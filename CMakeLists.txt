@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
-project(photo-slam LANGUAGES CXX CUDA)
+project(photo-slam LANGUAGES CXX)
 
 if(NOT CMAKE_BUILD_TYPE)
     # set(CMAKE_BUILD_TYPE Debug)
@@ -12,7 +12,18 @@ set(CMAKE_CUDA_STANDARD 17)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
 
+# CUDA 12.8 linker flags for PyTorch compatibility
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/cuda-12.8/lib64 -lcudart -Wl,-rpath,/usr/local/cuda-12.8/lib64")
+
 set(CAFFE2_USE_CUDNN on)
+
+# Force CUDA architecture to sm_90 and sm_120 for RTX 5090 (Blackwell)
+set(CMAKE_CUDA_ARCHITECTURES "90;120")
+set(TORCH_CUDA_ARCH_LIST "9.0")
+set(ENV{TORCH_CUDA_ARCH_LIST} "9.0")
+
+# Use CUDA 12.8 nvcc for sm_120 (Blackwell/RTX 5090) support
+set(CMAKE_CUDA_COMPILER /usr/local/cuda-12.8/bin/nvcc CACHE FILEPATH "Path to CUDA compiler" FORCE)
 
 # Uncomment the following line if you want to solve CMake Warning "Failed to compute shorthash for libnvrtc.so"
 # set(PYTHON_EXECUTABLE "/usr/bin/python3")
@@ -20,10 +31,12 @@ set(CAFFE2_USE_CUDNN on)
 find_package(Torch REQUIRED)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS} -pthread")
 
-# set(ENV{CUDA_LAUNCH_BLOCKING} 1)
-# set(ENV{TORCH_USE_CUDA_DSA} 1)
+# Enable CUDA after Torch is found (avoids glibc detection issues)
+enable_language(CUDA)
 
-find_package(CUDA REQUIRED)
+# Add CUDA 12.8 library path
+link_directories(/usr/local/cuda-12.8/lib64)
+
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV 4 REQUIRED)
 find_package(jsoncpp REQUIRED)
@@ -57,6 +70,7 @@ add_library(simple_knn SHARED
     third_party/simple-knn/spatial.cu
     third_party/simple-knn/spatial.h)
 # target_compile_features(simple_knn PUBLIC cxx_std_17)
+set_target_properties(simple_knn PROPERTIES CUDA_ARCHITECTURES "90;120")
 target_link_libraries(simple_knn "${TORCH_LIBRARIES}")
 
 add_library(cuda_rasterizer SHARED
@@ -77,7 +91,7 @@ add_library(cuda_rasterizer SHARED
     cuda_rasterizer/rasterizer_impl.cu
     cuda_rasterizer/rasterizer_impl.h
     cuda_rasterizer/stereo_vision.h)
-set_target_properties(cuda_rasterizer PROPERTIES CUDA_ARCHITECTURES "75;86")
+set_target_properties(cuda_rasterizer PROPERTIES CUDA_ARCHITECTURES "90;120")
 # target_compile_features(cuda_rasterizer PUBLIC cxx_std_17)
 target_include_directories(cuda_rasterizer PRIVATE
     ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
@@ -145,7 +159,7 @@ add_library(gaussian_mapper SHARED
 target_link_libraries(gaussian_mapper
     ${ORB_SLAM3_SOURCE_DIR}/lib/libORB_SLAM3.so
     ${OpenCV_LIBRARIES}
-    jsoncpp_lib
+    /home/crl/miniconda3/envs/slam_env/lib/libjsoncpp.so
     "${TORCH_LIBRARIES}"
     Eigen3::Eigen
     simple_knn
@@ -166,7 +180,7 @@ target_link_libraries(gaussian_viewer
     gaussian_mapper
     imgui
     ${OpenCV_LIBRARIES}
-    jsoncpp_lib
+    /home/crl/miniconda3/envs/slam_env/lib/libjsoncpp.so
     "${TORCH_LIBRARIES}"
     glm::glm
     glfw

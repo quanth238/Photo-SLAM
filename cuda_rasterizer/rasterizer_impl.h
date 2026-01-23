@@ -12,6 +12,7 @@
 #pragma once
 
 #include <iostream>
+#include <cstdint>  // Required for uint64_t, uint32_t with CUDA 12.8 on Ubuntu 24.04
 #include <vector>
 #include "rasterizer.h"
 #include <cuda_runtime_api.h>

@@ -119,7 +119,7 @@ ${OpenCV_LIBS}
 ${EIGEN3_LIBS}
 ${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so
 ${PROJECT_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
--lboost_serialization
+/home/crl/miniconda3/envs/slam_env/lib/libboost_serialization.so
 -lcrypto
 )
 

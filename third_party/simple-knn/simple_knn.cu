@@ -14,6 +14,8 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include "simple_knn.h"
+#include <cfloat>   // Required for FLT_MAX with CUDA 12.8 on Ubuntu 24.04
+#include <cstdint>  // Required for uint32_t with CUDA 12.8 on Ubuntu 24.04
 #include <cub/cub.cuh>
 #include <cub/device/device_radix_sort.cuh>
 #include <vector>
