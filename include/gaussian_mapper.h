@@ -195,6 +195,8 @@ protected:
     void recordKeyframeRendered(
         torch::Tensor &rendered,
         torch::Tensor &ground_truth,
+        torch::Tensor &rendered_depth,
+        torch::Tensor &gt_depth,
         unsigned long kfid,
         std::filesystem::path result_img_dir,
         std::filesystem::path result_gt_dir,

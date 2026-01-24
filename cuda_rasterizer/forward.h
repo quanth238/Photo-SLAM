@@ -55,11 +55,19 @@ namespace FORWARD
 		int W, int H,
 		const float2* points_xy_image,
 		const float* features,
+		const float* depths,
 		const float4* conic_opacity,
-		float* final_T,
+		float* out_alpha,
 		uint32_t* n_contrib,
 		const float* bg_color,
-		float* out_color);
+		float* out_color,
+		float* out_depth,
+		float* out_median_depth,
+		const float* gt_depth,
+		float* out_depth_var,
+		float* gau_uncertainty,
+		int* gau_related_pixels
+		);
 }
 
 

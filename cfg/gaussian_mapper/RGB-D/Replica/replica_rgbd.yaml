@@ -39,10 +39,10 @@ GausPyramid.sub_level_times_of_use: 8
 Pipeline.convert_SHs: 0  # 0:false, 1 or other integer:true
 Pipeline.compute_cov3D: 0  # 0:false, 1 or other integer:true
 
-Record.keyframe_record_interval: 0 # 0:never, 1:always, others:periodically
+Record.keyframe_record_interval: 10 # 0:never, 1:always, others:periodically
 Record.all_keyframes_record_interval: 0 # 0:never, 1:always, others:periodically
 Record.record_rendered_image: 1 # 0:false, 1 or other integer:true
-Record.record_ground_truth_image: 0 # 0:false, 1 or other integer:true
+Record.record_ground_truth_image: 1 # 0:false, 1 or other integer:true
 Record.record_loss_image: 0 # 0:false, 1 or other integer:true
 Record.training_report_interval: 0 # 0:never, 1:always, others:periodically
 Record.record_loop_ply: 0 # 0:false, 1 or other integer:true
@@ -65,6 +65,7 @@ Optimization.rotation_lr: 0.001 #0.001
 # Densification
 Optimization.percent_dense: 0.01
 Optimization.lambda_dssim: 0.2
+Optimization.lambda_depth: 0.2
 Optimization.densification_interval: 100
 Optimization.opacity_reset_interval: 0  # 0:never, 1:always, others:periodically
 Optimization.prune_big_point_after_iter: 30000

@@ -29,13 +29,28 @@ namespace BACKWARD
 		const float2* means2D,
 		const float4* conic_opacity,
 		const float* colors,
-		const float* final_Ts,
+		const float* depths,
+		const float* alphas,
 		const uint32_t* n_contrib,
 		const float* dL_dpixels,
+		const float* dL_dpixel_depths,
+		const float* dL_dpixel_median_depths,
+		const float* dL_dpixel_depth_vars,
 		float3* dL_dmean2D,
 		float4* dL_dconic2D,
 		float* dL_dopacity,
-		float* dL_dcolors);
+		float* dL_dcolors,
+		float* dL_ddepths,
+		float* dgc_ndcs_dviewmatrix,
+		float* dL_dview,
+		float* dg_camd_dviewmatrix,
+		const float3* means,
+		const float* view,
+		glm::vec3* dL_dmeans,
+		const float* gt_depth,
+		bool track_off,
+		bool map_off
+		);
 
 	void preprocess(
 		int P, int D, int M,
@@ -56,10 +71,23 @@ namespace BACKWARD
 		const float* dL_dconics,
 		glm::vec3* dL_dmeans,
 		float* dL_dcolor,
+		float* dL_ddepth,
 		float* dL_dcov3D,
 		float* dL_dsh,
 		glm::vec3* dL_dscale,
-		glm::vec4* dL_drot);
+		glm::vec4* dL_drot
+		);
+
+	void pose_gradient_pre(
+		int P,
+		const float3* means,
+		const int* radii,
+		const float* view,
+		const float* proj,
+		float* dgc_ndcs_dviewmatrix,
+		const float* perspec,
+		float* dg_camd_dviewmatrix
+	);
 }
 
 #endif

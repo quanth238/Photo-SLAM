@@ -101,6 +101,7 @@ public:
     std::vector<std::size_t> gaus_pyramid_height_;           ///< gaus_pyramid image
     std::vector<torch::Tensor> gaus_pyramid_original_image_; ///< gaus_pyramid image
     // Tensor gt_alpha_mask_;
+    torch::Tensor gt_depth_; ///< ground truth depth
 
     std::vector<float> intr_; ///< intrinsics
 

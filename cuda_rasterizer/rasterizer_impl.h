@@ -12,8 +12,8 @@
 #pragma once
 
 #include <iostream>
-#include <cstdint>  // Required for uint64_t, uint32_t with CUDA 12.8 on Ubuntu 24.04
 #include <vector>
+#include <cstdint>
 #include "rasterizer.h"
 #include <cuda_runtime_api.h>
 
@@ -48,7 +48,6 @@ namespace CudaRasterizer
 	{
 		uint2* ranges;
 		uint32_t* n_contrib;
-		float* accum_alpha;
 
 		static ImageState fromChunk(char*& chunk, size_t N);
 	};

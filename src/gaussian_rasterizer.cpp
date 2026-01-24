@@ -37,17 +37,6 @@ GaussianRasterizerFunction::forward(
     torch::Tensor rotations,
     torch::Tensor cov3Ds_precomp,
     GaussianRasterizationSettings raster_settings)
-    // torch::Tensor bg,
-    // float scale_modifier,
-    // torch::Tensor viewmatrix,
-    // torch::Tensor projmatrix,
-    // float tan_fovx,
-    // float tan_fovy,
-    // int image_height,
-    // int image_width,
-    // int sh_degree,
-    // torch::Tensor campos,
-    // bool prefiltered)
 {
     // Invoke C++/CUDA rasterizer
     auto rasterization_result = RasterizeGaussiansCUDA(
@@ -60,6 +49,7 @@ GaussianRasterizerFunction::forward(
         raster_settings.scale_modifier_,
         cov3Ds_precomp,
         raster_settings.viewmatrix_,
+        raster_settings.gt_depth_,
         raster_settings.projmatrix_,
         raster_settings.tanfovx_,
         raster_settings.tanfovy_,
@@ -68,15 +58,21 @@ GaussianRasterizerFunction::forward(
         sh,
         raster_settings.sh_degree_,
         raster_settings.campos_,
-        raster_settings.prefiltered_
+        raster_settings.prefiltered_,
+        raster_settings.debug_
     );
 
     auto num_rendered = std::get<0>(rasterization_result);
     auto color = std::get<1>(rasterization_result);
-    auto radii = std::get<2>(rasterization_result);
-    auto geomBuffer = std::get<3>(rasterization_result);
-    auto binningBuffer = std::get<4>(rasterization_result);
-    auto imgBuffer = std::get<5>(rasterization_result);
+    auto depth = std::get<2>(rasterization_result);
+    auto median_depth = std::get<3>(rasterization_result); // unused 
+    auto depth_var = std::get<4>(rasterization_result);
+    // auto alpha = std::get<5>(rasterization_result);
+    auto radii = std::get<6>(rasterization_result);
+    auto geomBuffer = std::get<7>(rasterization_result);
+    auto binningBuffer = std::get<8>(rasterization_result);
+    auto imgBuffer = std::get<9>(rasterization_result);
+    auto alphas = std::get<5>(rasterization_result);
 
     // Keep relevant tensors for backward
     ctx->saved_data["num_rendered"] = num_rendered;
@@ -84,6 +80,10 @@ GaussianRasterizerFunction::forward(
     ctx->saved_data["tanfovx"] = raster_settings.tanfovx_;
     ctx->saved_data["tanfovy"] = raster_settings.tanfovy_;
     ctx->saved_data["sh_degree"] = raster_settings.sh_degree_;
+    ctx->saved_data["debug"] = raster_settings.debug_;
+    ctx->saved_data["track_off"] = raster_settings.track_off_;
+    ctx->saved_data["map_off"] = raster_settings.map_off_;
+    
     ctx->save_for_backward({raster_settings.bg_,
                             raster_settings.viewmatrix_,
                             raster_settings.projmatrix_,
@@ -97,9 +97,13 @@ GaussianRasterizerFunction::forward(
                             sh,
                             geomBuffer,
                             binningBuffer,
-                            imgBuffer});
+                            imgBuffer,
+                            alphas,
+                            raster_settings.perspec_matrix_,
+                            raster_settings.gt_depth_
+                            });
 
-    return {color, radii};
+    return {color, radii, depth, depth_var};
 }
 
 torch::autograd::tensor_list
@@ -113,6 +117,9 @@ GaussianRasterizerFunction::backward(
     auto tanfovx = static_cast<float>(ctx->saved_data["tanfovx"].toDouble());
     auto tanfovy = static_cast<float>(ctx->saved_data["tanfovy"].toDouble());
     auto sh_degree = ctx->saved_data["sh_degree"].toInt();
+    auto debug = ctx->saved_data["debug"].toBool();
+    auto track_off = ctx->saved_data["track_off"].toBool();
+    auto map_off = ctx->saved_data["map_off"].toBool();
 
     auto saved = ctx->get_saved_variables();
 
@@ -130,9 +137,18 @@ GaussianRasterizerFunction::backward(
     auto geomBuffer = saved[11];
     auto binningBuffer = saved[12];
     auto imgBuffer = saved[13];
+    auto alphas = saved[14];
+    auto perspec_matrix = saved[15];
+    auto gt_depth = saved[16];
 
     // Compute gradients for relevant tensors by invoking backward method
     auto grad_out_color = grad_outputs[0];
+    // radius idx 1
+    auto grad_out_depth = grad_outputs[2];
+    auto grad_out_depth_var = grad_outputs[3];
+    // median depth default 0 gradient
+    auto grad_out_median_depth = torch::zeros_like(grad_out_depth);
+
     auto rasterization_backward_result = RasterizeGaussiansBackwardCUDA(
         bg,
         means3D,
@@ -147,13 +163,22 @@ GaussianRasterizerFunction::backward(
         tanfovx,
         tanfovy,
         grad_out_color,
+        grad_out_depth,
+        grad_out_median_depth,
+        grad_out_depth_var,
+        gt_depth,
         sh,
         sh_degree,
         campos,
         geomBuffer,
         num_rendered,
         binningBuffer,
-        imgBuffer
+        imgBuffer,
+        alphas,
+        debug,
+        perspec_matrix,
+        track_off,
+        map_off
     );
 
     return {
@@ -165,21 +190,11 @@ GaussianRasterizerFunction::backward(
         std::get<6>(rasterization_backward_result)/*dL_dscales*/,
         std::get<7>(rasterization_backward_result)/*dL_drotations*/,
         std::get<4>(rasterization_backward_result)/*dL_dcov3D*/,
-        torch::Tensor()//,
-        // torch::Tensor(),
-        // torch::Tensor(),
-        // torch::Tensor(),
-        // torch::Tensor(),
-        // torch::Tensor(),
-        // torch::Tensor(),
-        // torch::Tensor(),
-        // torch::Tensor(),
-        // torch::Tensor(),
-        // torch::Tensor()
+        torch::Tensor()
     };
 }
 
-std::tuple<torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 GaussianRasterizer::forward(
     torch::Tensor means3D,
     torch::Tensor means2D,
@@ -230,5 +245,5 @@ GaussianRasterizer::forward(
         raster_settings
     );
 
-    return std::make_tuple(result[0]/*color*/, result[1]/*radii*/);
+    return std::make_tuple(result[0]/*color*/, result[1]/*radii*/, result[2]/*depth*/, result[3]/*depth_var*/);
 }

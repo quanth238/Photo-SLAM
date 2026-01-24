@@ -29,7 +29,7 @@
 class GaussianRenderer
 {
 public:
-    static std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> render(
+    static std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> render(
         std::shared_ptr<GaussianKeyframe> viewpoint_camera,
         int image_height,
         int image_width,
@@ -38,5 +38,8 @@ public:
         torch::Tensor& bg_color,
         torch::Tensor& override_color,
         float scaling_modifier = 1.0f,
-        bool has_override_color = false);
+        bool has_override_color = false,
+        torch::Tensor gt_depth = torch::Tensor(),
+        bool track_off = false,
+        bool map_off = false);
 };

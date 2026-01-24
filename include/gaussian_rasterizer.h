@@ -35,10 +35,17 @@ struct GaussianRasterizationSettings
         torch::Tensor& projmatrix,
         int sh_degree,
         torch::Tensor& campos,
-        bool prefiltered)
+        bool prefiltered,
+        torch::Tensor& gt_depth,
+        bool track_off,
+        bool map_off,
+        bool debug,
+        torch::Tensor& perspec_matrix)
         : image_height_(image_height), image_width_(image_width), tanfovx_(tanfovx), tanfovy_(tanfovy),
           bg_(bg), scale_modifier_(scale_modifier), viewmatrix_(viewmatrix), projmatrix_(projmatrix),
-          sh_degree_(sh_degree), campos_(campos), prefiltered_(prefiltered)
+          sh_degree_(sh_degree), campos_(campos), prefiltered_(prefiltered),
+          gt_depth_(gt_depth), track_off_(track_off), map_off_(map_off), debug_(debug),
+          perspec_matrix_(perspec_matrix)
     {}
 
     int image_height_;
@@ -52,6 +59,11 @@ struct GaussianRasterizationSettings
     int sh_degree_;
     torch::Tensor campos_;
     bool prefiltered_;
+    torch::Tensor gt_depth_;
+    bool track_off_;
+    bool map_off_;
+    bool debug_;
+    torch::Tensor perspec_matrix_;
 };
 
 class GaussianRasterizerFunction : public torch::autograd::Function<GaussianRasterizerFunction>
@@ -71,7 +83,7 @@ public:
 
     static torch::autograd::tensor_list backward(
         torch::autograd::AutogradContext *ctx,
-        torch::autograd::tensor_list grad_out_color);
+        torch::autograd::tensor_list grad_outputs);
 };
 
 inline torch::autograd::tensor_list rasterizeGaussians(
@@ -107,7 +119,7 @@ public:
 
     torch::Tensor markVisibleGaussians(torch::Tensor& positions);
 
-    std::tuple<torch::Tensor, torch::Tensor> forward(
+    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> forward(
         torch::Tensor means3D,
         torch::Tensor means2D,
         torch::Tensor opacities,

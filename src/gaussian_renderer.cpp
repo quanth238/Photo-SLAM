@@ -18,9 +18,9 @@
 /**
  * @brief 
  * 
- * @return std::tuple<render, viewspace_points, visibility_filter, radii>, which are all `torch::Tensor`
+ * @return std::tuple<render, viewspace_points, visibility_filter, radii, depth, depth_var>, which are all `torch::Tensor`
  */
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 GaussianRenderer::render(
     std::shared_ptr<GaussianKeyframe> viewpoint_camera,
     int image_height,
@@ -30,7 +30,10 @@ GaussianRenderer::render(
     torch::Tensor& bg_color,
     torch::Tensor& override_color,
     float scaling_modifier,
-    bool use_override_color)
+    bool use_override_color,
+    torch::Tensor gt_depth,
+    bool track_off,
+    bool map_off)
 {
     /* Render the scene. 
 
@@ -45,6 +48,10 @@ GaussianRenderer::render(
     }
     catch (const std::exception& e) {
         ; // pass
+    }
+
+    if (!gt_depth.defined()) {
+        gt_depth = torch::empty({0}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
     }
 
     // Set up rasterization configuration
@@ -62,7 +69,12 @@ GaussianRenderer::render(
         viewpoint_camera->full_proj_transform_,
         pc->active_sh_degree_,
         viewpoint_camera->camera_center_,
-        false
+        false,
+        gt_depth,
+        track_off,
+        map_off,
+        false /*debug*/,
+        viewpoint_camera->projection_matrix_ /*perspec_matrix*/
     );
 
     GaussianRasterizer rasterizer(raster_settings);
@@ -135,7 +147,10 @@ GaussianRenderer::render(
         cov3D_precomp
     );
     auto rendered_image = std::get<0>(rasterizer_result);
+    // auto radii = std::get<1>(rasterizer_result); // Wait, new return has 4.
     auto radii = std::get<1>(rasterizer_result);
+    auto rendered_depth = std::get<2>(rasterizer_result);
+    auto rendered_depth_var = std::get<3>(rasterizer_result);
 
     /* Those Gaussians that were frustum culled or had a radius of 0 were not visible.
        They will be excluded from value updates used in the splitting criteria.
@@ -144,6 +159,8 @@ GaussianRenderer::render(
         rendered_image,     /*render*/
         screenspace_points, /*viewspace_points*/
         radii > 0,          /*visibility_filter*/
-        radii               /*radii*/
+        radii,              /*radii*/
+        rendered_depth,     /*depth*/
+        rendered_depth_var  /*depth_var*/
     );
 }

@@ -76,6 +76,7 @@ inline cv::Mat torchTensor2CvMat_Float32(torch::Tensor& tensor)
     {
     case 2:
     {
+        mat_tensor = mat_tensor.to(torch::kCPU);
         mat = cv::Mat(/*rows=*/mat_tensor.size(0),
                       /*cols=*/mat_tensor.size(1),
                       /*type=*/CV_32FC1,

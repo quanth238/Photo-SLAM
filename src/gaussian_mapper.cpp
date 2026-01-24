@@ -345,6 +345,8 @@ void GaussianMapper::readConfigFromFile(std::filesystem::path cfg_path)
         settings_file["Optimization.percent_dense"].operator float();
     opt_params_.lambda_dssim_ =
         settings_file["Optimization.lambda_dssim"].operator float();
+    opt_params_.lambda_depth_ =
+        settings_file["Optimization.lambda_depth"].operator float();
     opt_params_.densification_interval_ =
         settings_file["Optimization.densification_interval"].operator int();
     opt_params_.opacity_reset_interval_ =
@@ -427,6 +429,10 @@ void GaussianMapper::run()
                         new_kf->original_image_ =
                             tensor_utils::cvMat2TorchTensor_Float32(imgRGB_undistorted, device_type_);
                         new_kf->img_filename_ = pKF->mNameFile;
+                        if (this->sensor_type_ == RGBD) {
+                            new_kf->gt_depth_ = 
+                                tensor_utils::cvMat2TorchTensor_Float32(imgAux_undistorted, device_type_);
+                        }
                         new_kf->gaus_pyramid_height_ = camera.gaus_pyramid_height_;
                         new_kf->gaus_pyramid_width_ = camera.gaus_pyramid_width_;
                         new_kf->gaus_pyramid_times_of_use_ = kf_gaus_pyramid_times_of_use_;
@@ -673,6 +679,31 @@ void GaussianMapper::trainForOneIteration()
     gaussians_->setScalingLearningRate(scalingLearningRate());
     gaussians_->setRotationLearningRate(rotationLearningRate());
 
+    // Prepare Depth
+    torch::Tensor gt_depth = torch::Tensor();
+    if (this->sensor_type_ == RGBD || this->sensor_type_ == STEREO) {
+         if (training_level == num_gaus_pyramid_sub_levels_) {
+             // Create depth tensor from auxiliary image (assuming Float32 or convert it)
+             // We use tensor_utils to convert. Assuming img_auxiliary_undist_ is available and correct type.
+             // RGBD SLAM usually has float depth in imgAuxiliary.
+             gt_depth = tensor_utils::cvMat2TorchTensor_Float32(viewpoint_cam->img_auxiliary_undist_, device_type_);
+         } else {
+             // Handle pyramid depth if necessary (resizing). For now, skipping pyramid depth or implement resize.
+             // Simple resize:
+             /*
+             cv::Mat img_depth_resized;
+             cv::resize(viewpoint_cam->img_auxiliary_undist_, img_depth_resized, 
+                cv::Size(viewpoint_cam->gaus_pyramid_width_[training_level], viewpoint_cam->gaus_pyramid_height_[training_level]));
+             gt_depth = tensor_utils::cvMat2TorchTensor_Float32(img_depth_resized, device_type_);
+             */
+             // Only use depth if not in pyramid mode or implement above (left as exercise/TODO if needed)
+         }
+    }
+    // Make sure gt_depth is on GPU
+    if (gt_depth.defined()) {
+        gt_depth = gt_depth.to(device_type_);
+    }
+
     // Render
     auto render_pkg = GaussianRenderer::render(
         viewpoint_cam,
@@ -681,12 +712,19 @@ void GaussianMapper::trainForOneIteration()
         gaussians_,
         pipe_params_,
         background_,
-        override_color_
+        override_color_,
+        1.0f, // scaling_modifier
+        false, // has_override_color
+        gt_depth, // gt_depth
+        false, // track_off
+        false // map_off
     );
     auto rendered_image = std::get<0>(render_pkg);
     auto viewspace_point_tensor = std::get<1>(render_pkg);
     auto visibility_filter = std::get<2>(render_pkg);
     auto radii = std::get<3>(render_pkg);
+    auto rendered_depth = std::get<4>(render_pkg);
+    auto rendered_depth_var = std::get<5>(render_pkg);
 
     // Get rid of black edges caused by undistortion
     torch::Tensor masked_image = rendered_image * mask;
@@ -696,6 +734,24 @@ void GaussianMapper::trainForOneIteration()
     float lambda_dssim = lambdaDssim();
     auto loss = (1.0 - lambda_dssim) * Ll1
                 + lambda_dssim * (1.0 - loss_utils::ssim(masked_image, gt_image, device_type_));
+    
+    // Depth Loss
+    if (gt_depth.defined() && (this->sensor_type_ == RGBD || this->sensor_type_ == STEREO)) {
+        // Mask depth where gt_depth > 0 (valid depth)
+        // Also apply undistort mask
+        // GT depth might match masked_image size
+        
+        // Ensure gt_depth is same size as rendered_depth
+        if (gt_depth.sizes() == rendered_depth.sizes()) {
+            auto valid_depth_mask = (gt_depth > 0.01f) & mask; 
+            auto depth_diff = torch::abs(rendered_depth - gt_depth);
+            auto l1_depth = (depth_diff * valid_depth_mask).sum() / (valid_depth_mask.sum() + 1e-6);
+            
+            float lambda_depth = 0.1f; // Regularization weight (tunable)
+            loss += lambda_depth * l1_depth;
+        }
+    }
+
     loss.backward();
 
     torch::cuda::synchronize();
@@ -706,7 +762,7 @@ void GaussianMapper::trainForOneIteration()
 
         if (keyframe_record_interval_ &&
             getIteration() % keyframe_record_interval_ == 0)
-            recordKeyframeRendered(masked_image, gt_image, viewpoint_cam->fid_, result_dir_, result_dir_, result_dir_);
+            recordKeyframeRendered(masked_image, gt_image, rendered_depth, gt_depth, viewpoint_cam->fid_, result_dir_, result_dir_, result_dir_);
 
         // Densification
         if (getIteration() < opt_params_.densify_until_iter_) {
@@ -1489,6 +1545,8 @@ void GaussianMapper::increasePcdByKeyframeInactiveGeoDensify(
 void GaussianMapper::recordKeyframeRendered(
         torch::Tensor &rendered,
         torch::Tensor &ground_truth,
+        torch::Tensor &rendered_depth,
+        torch::Tensor &gt_depth,
         unsigned long kfid,
         std::filesystem::path result_img_dir,
         std::filesystem::path result_gt_dir,
@@ -1500,6 +1558,20 @@ void GaussianMapper::recordKeyframeRendered(
         cv::cvtColor(image_cv, image_cv, CV_RGB2BGR);
         image_cv.convertTo(image_cv, CV_8UC3, 255.0f);
         cv::imwrite(result_img_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + ".jpg"), image_cv);
+        
+        // Save rendered depth
+        if (rendered_depth.defined() && rendered_depth.numel() > 0) {
+            auto depth_tensor = rendered_depth.ndimension() == 3 ? rendered_depth.squeeze() : rendered_depth;
+            auto depth_cv = tensor_utils::torchTensor2CvMat_Float32(depth_tensor);
+            // Normalize for visualization: 0-10m mapped to 0-255
+            cv::Mat depth_vis;
+            // Scale: 0 -> 0, 10m -> 255. Saturate cast handles clamping > 255
+            depth_cv.convertTo(depth_vis, CV_8UC1, 255.0 / 10.0);
+            
+            // Apply colormap (Jet: Blue=0m, Red=10m)
+            cv::applyColorMap(depth_vis, depth_vis, cv::COLORMAP_JET);
+            cv::imwrite(result_img_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + "_depth.jpg"), depth_vis);
+        }
     }
 
     if (record_ground_truth_image_) {
@@ -1507,6 +1579,18 @@ void GaussianMapper::recordKeyframeRendered(
         cv::cvtColor(gt_image_cv, gt_image_cv, CV_RGB2BGR);
         gt_image_cv.convertTo(gt_image_cv, CV_8UC3, 255.0f);
         cv::imwrite(result_gt_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + "_gt.jpg"), gt_image_cv);
+
+        // Save GT depth if available
+        if (gt_depth.defined() && gt_depth.numel() > 0) {
+            auto gt_depth_tensor = gt_depth.ndimension() == 3 ? gt_depth.squeeze() : gt_depth;
+            auto gt_depth_cv = tensor_utils::torchTensor2CvMat_Float32(gt_depth_tensor);
+            cv::Mat gt_depth_vis;
+             // Mask out invalid depth (0) before normalize if possible, but for simple vis:
+            // Scale: 0 -> 0, 10m -> 255. Saturate cast.
+            gt_depth_cv.convertTo(gt_depth_vis, CV_8UC1, 255.0 / 10.0);
+            cv::applyColorMap(gt_depth_vis, gt_depth_vis, cv::COLORMAP_JET);
+            cv::imwrite(result_gt_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + "_gt_depth.jpg"), gt_depth_vis);
+        }
     }
 
     if (record_loss_image_) {
@@ -1544,20 +1628,33 @@ cv::Mat GaussianMapper::renderFromPose(
         throw std::runtime_error("[GaussianMapper::renderFromPose]KeyFrame Camera not found!");
     }
 
-    std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> render_pkg;
-    {
-        std::unique_lock<std::mutex> lock_render(mutex_render_);
-        // Render
-        render_pkg = GaussianRenderer::render(
-            pkf,
-            height,
-            width,
-            gaussians_,
-            pipe_params_,
-            background_,
-            override_color_
-        );
-    }
+    // std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> render_pkg;
+    // {
+    //     std::unique_lock<std::mutex> lock_render(mutex_render_);
+    //     // Render
+    //     render_pkg = GaussianRenderer::render(
+    //         pkf,
+    //         height,
+    //         width,
+    //         gaussians_,
+    //         pipe_params_,
+    //         background_,
+    //         override_color_
+    //     );
+    // }
+    
+    std::unique_lock<std::mutex> lock_render(mutex_render_);
+    auto render_pkg = GaussianRenderer::render(
+        pkf,
+        height,
+        width,
+        gaussians_,
+        pipe_params_,
+        background_,
+        override_color_,
+        main_vision ? rendered_image_viewer_scale_main_ : rendered_image_viewer_scale_
+    );
+    lock_render.unlock();
 
     // Result
     torch::Tensor masked_image;
@@ -1580,6 +1677,13 @@ void GaussianMapper::renderAndRecordKeyframe(
     std::string name_suffix)
 {
     auto start_timing = std::chrono::steady_clock::now();
+    // Prepare Depth (fetch if available in keyframe, though not used in render here unless we pass it to loss or vis)
+    torch::Tensor gt_depth = torch::Tensor();
+    if (this->sensor_type_ == RGBD || this->sensor_type_ == STEREO) {
+         if (pkf->img_auxiliary_undist_.empty() == false)
+            gt_depth = tensor_utils::cvMat2TorchTensor_Float32(pkf->img_auxiliary_undist_, device_type_);
+    }
+
     auto render_pkg = GaussianRenderer::render(
         pkf,
         pkf->image_height_,
@@ -1587,9 +1691,15 @@ void GaussianMapper::renderAndRecordKeyframe(
         gaussians_,
         pipe_params_,
         background_,
-        override_color_
+        override_color_,
+        1.0f,
+        false,
+        gt_depth,
+        true, // track_off
+        true // map_off
     );
     auto rendered_image = std::get<0>(render_pkg);
+    auto rendered_depth = std::get<4>(render_pkg);
     torch::Tensor masked_image = rendered_image * undistort_mask_[pkf->camera_id_];
     torch::cuda::synchronize();
     auto end_timing = std::chrono::steady_clock::now();
@@ -1601,7 +1711,7 @@ void GaussianMapper::renderAndRecordKeyframe(
     psnr = loss_utils::psnr(masked_image, gt_image).item().toFloat();
     psnr_gs = loss_utils::psnr_gaussian_splatting(masked_image, gt_image).item().toFloat();
 
-    recordKeyframeRendered(masked_image, gt_image, pkf->fid_, result_img_dir, result_gt_dir, result_loss_dir, name_suffix);    
+    recordKeyframeRendered(masked_image, gt_image, rendered_depth, gt_depth, pkf->fid_, result_img_dir, result_gt_dir, result_loss_dir, name_suffix);    
 }
 
 void GaussianMapper::renderAndRecordAllKeyframes(

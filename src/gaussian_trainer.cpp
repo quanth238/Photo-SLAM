@@ -76,11 +76,37 @@ void GaussianTrainer::trainingOnce(
         auto viewspace_point_tensor = std::get<1>(render_pkg);
         auto visibility_filter = std::get<2>(render_pkg);
         auto radii = std::get<3>(render_pkg);
+        // depth and uncertainty unused in deprecated trainer
+        // auto depth = std::get<4>(render_pkg);
+        // auto uncertainty = std::get<5>(render_pkg);
 
         // Loss
         auto gt_image = viewpoint_cam->original_image_.cuda();
         auto Ll1 = loss_utils::l1_loss(image, gt_image);
         auto loss = (1.0 - opt.lambda_dssim_) * Ll1 + opt.lambda_dssim_ * (1.0 - loss_utils::ssim(image, gt_image));
+
+        // Depth Loss
+        if (opt.lambda_depth_ > 0.0f)
+        {
+            auto rendered_depth = std::get<4>(render_pkg);
+            auto gt_depth = viewpoint_cam->gt_depth_.cuda();
+            
+            // Expected gt_depth is 1xHxW or HxW. Rendered depth is 1xHxW.
+            // Check dimensions and resize/reshape if necessary.
+            // Assuming simplified case where they match or broadcast correctly.
+            
+            // Masking invalid depth (<= 0)
+            auto mask = gt_depth > 0.0f;
+            
+            // L1 Loss on valid pixels only
+            if (mask.sum().item().toFloat() > 0.0f) {
+                auto diff = torch::abs(rendered_depth - gt_depth);
+                auto masked_diff = diff.masked_select(mask);
+                auto depth_loss_val = masked_diff.mean();
+                loss = loss + opt.lambda_depth_ * depth_loss_val;
+            }
+        }
+        
         loss.backward();
 
         torch::cuda::synchronize();
