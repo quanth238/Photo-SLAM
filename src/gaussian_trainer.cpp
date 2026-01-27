@@ -107,6 +107,18 @@ void GaussianTrainer::trainingOnce(
             }
         }
         
+        // Alignment Loss
+        if (opt.lambda_align_ > 0.0f)
+        {
+            auto rendered_depth = std::get<4>(render_pkg);          // Alpha-blending depth
+            auto rendered_median_depth = std::get<5>(render_pkg);   // Median depth
+            
+            // L1 loss between alpha and median depth
+            auto align_diff = torch::abs(rendered_depth - rendered_median_depth);
+            auto align_loss_val = align_diff.mean();
+            loss = loss + opt.lambda_align_ * align_loss_val;
+        }
+        
         loss.backward();
 
         torch::cuda::synchronize();

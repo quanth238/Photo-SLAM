@@ -8,7 +8,7 @@ REPLICA_DATA=/home/crl/lehieu/MyPhotoSLAM/data/Replica
 export LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
 
 # Run for seed 0 (can change to "0 1 2 3 4" for 5 runs)
-for i in 0 1 2
+for i in 0
 do
     # List of all Replica scenes
     scenes="office0 office1 office2 office3 office4 room0 room1 room2"

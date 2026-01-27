@@ -65,7 +65,7 @@ GaussianRasterizerFunction::forward(
     auto num_rendered = std::get<0>(rasterization_result);
     auto color = std::get<1>(rasterization_result);
     auto depth = std::get<2>(rasterization_result);
-    auto median_depth = std::get<3>(rasterization_result); // unused 
+    auto median_depth = std::get<3>(rasterization_result); 
     auto depth_var = std::get<4>(rasterization_result);
     // auto alpha = std::get<5>(rasterization_result);
     auto radii = std::get<6>(rasterization_result);
@@ -103,7 +103,7 @@ GaussianRasterizerFunction::forward(
                             raster_settings.gt_depth_
                             });
 
-    return {color, radii, depth, depth_var};
+    return {color, radii, depth, depth_var, median_depth};
 }
 
 torch::autograd::tensor_list

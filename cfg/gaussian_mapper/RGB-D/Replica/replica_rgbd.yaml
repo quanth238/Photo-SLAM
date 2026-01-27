@@ -66,6 +66,7 @@ Optimization.rotation_lr: 0.001 #0.001
 Optimization.percent_dense: 0.01
 Optimization.lambda_dssim: 0.2
 Optimization.lambda_depth: 0.2
+Optimization.lambda_align: 0.3
 Optimization.densification_interval: 100
 Optimization.opacity_reset_interval: 0  # 0:never, 1:always, others:periodically
 Optimization.prune_big_point_after_iter: 30000

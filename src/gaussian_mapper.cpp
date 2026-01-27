@@ -347,6 +347,8 @@ void GaussianMapper::readConfigFromFile(std::filesystem::path cfg_path)
         settings_file["Optimization.lambda_dssim"].operator float();
     opt_params_.lambda_depth_ =
         settings_file["Optimization.lambda_depth"].operator float();
+    opt_params_.lambda_align_ =
+        settings_file["Optimization.lambda_align"].operator float();
     opt_params_.densification_interval_ =
         settings_file["Optimization.densification_interval"].operator int();
     opt_params_.opacity_reset_interval_ =
@@ -715,7 +717,7 @@ void GaussianMapper::trainForOneIteration()
         override_color_,
         1.0f, // scaling_modifier
         false, // has_override_color
-        gt_depth, // gt_depth
+        (opt_params_.lambda_depth_ > 0.0f) ? gt_depth : torch::Tensor(), // gt_depth
         false, // track_off
         false // map_off
     );
@@ -747,8 +749,7 @@ void GaussianMapper::trainForOneIteration()
             auto depth_diff = torch::abs(rendered_depth - gt_depth);
             auto l1_depth = (depth_diff * valid_depth_mask).sum() / (valid_depth_mask.sum() + 1e-6);
             
-            float lambda_depth = 0.1f; // Regularization weight (tunable)
-            loss += lambda_depth * l1_depth;
+            loss += opt_params_.lambda_depth_ * l1_depth;
         }
     }
 
@@ -1563,6 +1564,16 @@ void GaussianMapper::recordKeyframeRendered(
         if (rendered_depth.defined() && rendered_depth.numel() > 0) {
             auto depth_tensor = rendered_depth.ndimension() == 3 ? rendered_depth.squeeze() : rendered_depth;
             auto depth_cv = tensor_utils::torchTensor2CvMat_Float32(depth_tensor);
+            
+            // Save raw 16-bit depth map
+            float depth_scale = 1000.0f; // Default if not found
+            if (this->pSLAM_ && this->pSLAM_->getSettings()) {
+                depth_scale = this->pSLAM_->getSettings()->depthMapFactor();
+            }
+            cv::Mat depth_u16;
+            depth_cv.convertTo(depth_u16, CV_16U, depth_scale);
+            cv::imwrite(result_img_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + "_depth_raw.png"), depth_u16);
+
             // Normalize for visualization: 0-10m mapped to 0-255
             cv::Mat depth_vis;
             // Scale: 0 -> 0, 10m -> 255. Saturate cast handles clamping > 255
@@ -1584,6 +1595,16 @@ void GaussianMapper::recordKeyframeRendered(
         if (gt_depth.defined() && gt_depth.numel() > 0) {
             auto gt_depth_tensor = gt_depth.ndimension() == 3 ? gt_depth.squeeze() : gt_depth;
             auto gt_depth_cv = tensor_utils::torchTensor2CvMat_Float32(gt_depth_tensor);
+            
+            // Save raw 16-bit depth map
+            float depth_scale = 1000.0f; // Default if not found
+            if (this->pSLAM_ && this->pSLAM_->getSettings()) {
+                depth_scale = this->pSLAM_->getSettings()->depthMapFactor();
+            }
+            cv::Mat gt_depth_u16;
+            gt_depth_cv.convertTo(gt_depth_u16, CV_16U, depth_scale);
+            cv::imwrite(result_gt_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + "_gt_depth_raw.png"), gt_depth_u16);
+
             cv::Mat gt_depth_vis;
              // Mask out invalid depth (0) before normalize if possible, but for simple vis:
             // Scale: 0 -> 0, 10m -> 255. Saturate cast.
