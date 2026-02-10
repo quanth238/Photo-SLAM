@@ -6,10 +6,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-TUM_ROOT="${TUM_ROOT:-}"
+TUM_ROOT="${TUM_ROOT:-/home/crl/Congthai/datasets/TUM}"
 RESULTS_ROOT="${RESULTS_ROOT:-$ROOT/results/tum_rgbd_corrinit}"
 ELOFTR_PYTHON="${ELOFTR_PYTHON:-python3}"
-ELOFTR_WEIGHTS="${ELOFTR_WEIGHTS:-$ROOT/weights/eloftr_outdoor.ckpt}"
+ELOFTR_WEIGHTS="${ELOFTR_WEIGHTS:-/home/crl/Congthai/photoslam_edgs/weights/eloftr_outdoor.ckpt}"
 ELOFTR_DEVICE="${ELOFTR_DEVICE:-cuda}"
 ZMQ_ENDPOINT="${ZMQ_ENDPOINT:-tcp://127.0.0.1:5555}"
 
@@ -23,10 +23,7 @@ usage() {
   echo "  ZMQ_ENDPOINT=tcp://127.0.0.1:5555" >&2
 }
 
-if [[ -z "${TUM_ROOT}" ]]; then
-  usage
-  exit 1
-fi
+# TUM_ROOT is set to a default absolute path; keep usage for overrides.
 
 if [[ ! -x "$ROOT/bin/tum_rgbd" ]]; then
   echo "Error: $ROOT/bin/tum_rgbd not found or not executable." >&2
