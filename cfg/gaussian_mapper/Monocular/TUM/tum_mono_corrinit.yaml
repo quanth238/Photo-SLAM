@@ -21,7 +21,7 @@ Stereo.num_disparity: 128
 RGBD.min_depth: 0.0000000001
 RGBD.max_depth: 40.0
 
-Mapper.inactive_geo_densify: 1  # 0:false, 1 or other integer:true
+Mapper.inactive_geo_densify: 0  # 0:false, 1 or other integer:true
 Mapper.depth_cache: 10
 Mapper.min_num_initial_map_kfs: 20
 Mapper.new_keyframe_times_of_use: 2
@@ -89,8 +89,8 @@ GaussianViewer.camera_watch_dist: 0.000001
 CorrInit.enable: 1
 CorrInit.neighbor_k: 1
 CorrInit.neighbor_candidates: 10
-CorrInit.num_seeds: 512
-CorrInit.num_oversample: 2048
+CorrInit.num_seeds: 2048
+CorrInit.num_oversample: 8192
 CorrInit.reproj_err_px: 3.0
 CorrInit.min_parallax_deg: 1.0
 CorrInit.queue_capacity: 8

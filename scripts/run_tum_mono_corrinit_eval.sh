@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# End-to-end runner: TUM Monocular CorrInit + Photo-SLAM-eval metrics
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Paths (override via env vars if needed)
+TUM_ROOT="${TUM_ROOT:-/home/crl/Congthai/datasets/TUM}"
+DATASET_CENTER="${DATASET_CENTER:-/home/crl/Congthai/datasets}"
+RESULTS_ROOT="${RESULTS_ROOT:-$ROOT/results/tum_mono_corrinit_eval}"
+if [[ "$RESULTS_ROOT" != /* ]]; then
+  RESULTS_ROOT="$ROOT/$RESULTS_ROOT"
+fi
+RESULTS_MAIN="${RESULTS_MAIN:-$RESULTS_ROOT/_eval_main}"
+if [[ "$RESULTS_MAIN" != /* ]]; then
+  RESULTS_MAIN="$ROOT/$RESULTS_MAIN"
+fi
+EVAL_ROOT="${EVAL_ROOT:-$ROOT/third_party/Photo-SLAM-eval}"
+
+ELOFTR_PYTHON="${ELOFTR_PYTHON:-python3}"
+ELOFTR_WEIGHTS="${ELOFTR_WEIGHTS:-/home/crl/Congthai/photoslam_edgs/weights/eloftr_outdoor.ckpt}"
+ELOFTR_DEVICE="${ELOFTR_DEVICE:-cuda}"
+ELOFTR_MATCH_COARSE_THR="${ELOFTR_MATCH_COARSE_THR:-0.1}"
+ZMQ_ENDPOINT="${ZMQ_ENDPOINT:-tcp://127.0.0.1:5555}"
+
+GAUSSIAN_CFG="${GAUSSIAN_CFG:-$ROOT/cfg/gaussian_mapper/Monocular/TUM/tum_mono_corrinit.yaml}"
+
+SCENE_NAME="${SCENE_NAME:-rgbd_dataset_freiburg1_desk}"
+
+usage() {
+  echo "Usage: $0" >&2
+  echo "Optional envs:" >&2
+  echo "  TUM_ROOT=/path/to/TUM" >&2
+  echo "  DATASET_CENTER=/path/to/datasets_root" >&2
+  echo "  RESULTS_ROOT=/path/to/results/tum_mono_corrinit_eval" >&2
+  echo "  RESULTS_MAIN=/path/to/results_main" >&2
+  echo "  EVAL_ROOT=/path/to/Photo-SLAM-eval" >&2
+  echo "  GAUSSIAN_CFG=/path/to/tum_mono_corrinit.yaml" >&2
+  echo "  SCENE_NAME=rgbd_dataset_freiburg1_desk|rgbd_dataset_freiburg2_xyz|rgbd_dataset_freiburg3_long_office_household" >&2
+  echo "  ELOFTR_PYTHON=python3" >&2
+  echo "  ELOFTR_WEIGHTS=/abs/path/eloftr_outdoor.ckpt" >&2
+  echo "  ELOFTR_DEVICE=cuda|cpu" >&2
+  echo "  ELOFTR_MATCH_COARSE_THR=0.1" >&2
+  echo "  ZMQ_ENDPOINT=tcp://127.0.0.1:5555" >&2
+}
+
+if [[ ! -x "$ROOT/bin/tum_mono" ]]; then
+  echo "Error: $ROOT/bin/tum_mono not found or not executable." >&2
+  echo "Build Photo-SLAM first." >&2
+  exit 1
+fi
+
+if [[ ! -f "$ELOFTR_WEIGHTS" ]]; then
+  echo "Error: LoFTR weights not found: $ELOFTR_WEIGHTS" >&2
+  exit 1
+fi
+
+if [[ ! -d "$EVAL_ROOT" || ! -f "$EVAL_ROOT/onekey.py" ]]; then
+  echo "Error: Photo-SLAM-eval not found at: $EVAL_ROOT" >&2
+  echo "Set EVAL_ROOT to your cloned Photo-SLAM-eval path." >&2
+  exit 1
+fi
+
+if [[ ! -f "$GAUSSIAN_CFG" ]]; then
+  echo "Error: Gaussian config not found: $GAUSSIAN_CFG" >&2
+  exit 1
+fi
+
+mkdir -p "$RESULTS_ROOT" "$RESULTS_MAIN"
+
+# Copy camera.yaml for TUM (required by evaluation)
+if [[ -f "$EVAL_ROOT/TUM/fr1/camera.yaml" ]]; then
+  cp -f "$EVAL_ROOT/TUM/fr1/camera.yaml" "$TUM_ROOT/rgbd_dataset_freiburg1_desk" || true
+fi
+if [[ -f "$EVAL_ROOT/TUM/fr2/camera.yaml" ]]; then
+  cp -f "$EVAL_ROOT/TUM/fr2/camera.yaml" "$TUM_ROOT/rgbd_dataset_freiburg2_xyz" || true
+fi
+if [[ -f "$EVAL_ROOT/TUM/fr3/camera.yaml" ]]; then
+  cp -f "$EVAL_ROOT/TUM/fr3/camera.yaml" "$TUM_ROOT/rgbd_dataset_freiburg3_long_office_household" || true
+fi
+
+case "$SCENE_NAME" in
+  rgbd_dataset_freiburg1_desk)
+    ORB_CFG="$ROOT/cfg/ORB_SLAM3/Monocular/TUM/tum_freiburg1_desk.yaml"
+    ;;
+  rgbd_dataset_freiburg2_xyz)
+    ORB_CFG="$ROOT/cfg/ORB_SLAM3/Monocular/TUM/tum_freiburg2_xyz.yaml"
+    ;;
+  rgbd_dataset_freiburg3_long_office_household)
+    ORB_CFG="$ROOT/cfg/ORB_SLAM3/Monocular/TUM/tum_freiburg3_long_office_household.yaml"
+    ;;
+  *)
+    echo "Error: unknown SCENE_NAME: $SCENE_NAME" >&2
+    usage
+    exit 1
+    ;;
+esac
+
+RUN_LOG="$RESULTS_ROOT/run_corrinit_eval.log"
+LOFTR_LOG="$RESULTS_ROOT/loftr_service.log"
+EVAL_LOG="$RESULTS_ROOT/eval_stdout.txt"
+
+echo "[CorrInit] Starting LoFTR sidecar..."
+"$ELOFTR_PYTHON" "$ROOT/scripts/efficientloftr_service.py" \
+  --endpoint "$ZMQ_ENDPOINT" \
+  --weights "$ELOFTR_WEIGHTS" \
+  --device "$ELOFTR_DEVICE" \
+  --match_coarse_thr "$ELOFTR_MATCH_COARSE_THR" >"$LOFTR_LOG" 2>&1 &
+
+LOFTR_PID=$!
+cleanup() { kill "$LOFTR_PID" 2>/dev/null || true; }
+trap cleanup EXIT
+
+sleep 1
+
+echo "[CorrInit] Running scene: $SCENE_NAME" | tee -a "$RUN_LOG"
+"$ROOT/bin/tum_mono" \
+  "$ROOT/ORB-SLAM3/Vocabulary/ORBvoc.txt" \
+  "$ORB_CFG" \
+  "$GAUSSIAN_CFG" \
+  "$TUM_ROOT/$SCENE_NAME" \
+  "$RESULTS_ROOT/$SCENE_NAME" \
+  no_viewer 2>&1 | tee -a "$RUN_LOG"
+
+# Create expected results alias for Photo-SLAM-eval
+ln -sfn "$RESULTS_ROOT" "$RESULTS_MAIN/tum_mono_0"
+
+echo "[Eval] Running Photo-SLAM-eval..."
+(cd "$EVAL_ROOT" && "$ELOFTR_PYTHON" "onekey.py" \
+  --dataset_center_path "$DATASET_CENTER" \
+  --result_main_folder "$RESULTS_MAIN") 2>&1 | tee "$EVAL_LOG"
+
+echo "[Eval] Done."
+echo "Run log: $RUN_LOG"
+echo "LoFTR log: $LOFTR_LOG"
+echo "Eval log: $EVAL_LOG"
+echo "Metrics: $RESULTS_MAIN/log.txt and $RESULTS_MAIN/log.csv"
