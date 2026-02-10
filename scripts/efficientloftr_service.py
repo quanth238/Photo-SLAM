@@ -38,9 +38,14 @@ def main():
     parser.add_argument("--endpoint", type=str, default="tcp://127.0.0.1:5555")
     parser.add_argument("--weights", type=str, default="weights/eloftr_outdoor.ckpt")
     parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--match_coarse_thr", type=float, default=None,
+                        help="Override match_coarse.thr (e.g., 0.2 for full model)")
     args = parser.parse_args()
 
     cfg = deepcopy(full_default_cfg)
+    if args.match_coarse_thr is not None:
+        # EfficientLoFTR expects lower-case config dict
+        cfg["match_coarse"]["thr"] = float(args.match_coarse_thr)
     matcher = LoFTR(config=cfg)
     try:
         ckpt = torch.load(args.weights, map_location=args.device, weights_only=False)

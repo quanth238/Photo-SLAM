@@ -23,6 +23,7 @@ EVAL_ROOT="${EVAL_ROOT:-$ROOT/third_party/Photo-SLAM-eval}"
 ELOFTR_PYTHON="${ELOFTR_PYTHON:-python3}"
 ELOFTR_WEIGHTS="${ELOFTR_WEIGHTS:-/home/crl/Congthai/photoslam_edgs/weights/eloftr_outdoor.ckpt}"
 ELOFTR_DEVICE="${ELOFTR_DEVICE:-cuda}"
+ELOFTR_MATCH_COARSE_THR="${ELOFTR_MATCH_COARSE_THR:-0.1}"
 ZMQ_ENDPOINT="${ZMQ_ENDPOINT:-tcp://127.0.0.1:5555}"
 
 GAUSSIAN_CFG="${GAUSSIAN_CFG:-$ROOT/cfg/gaussian_mapper/RGB-D/TUM/tum_rgbd_corrinit_eval.yaml}"
@@ -39,6 +40,7 @@ usage() {
   echo "  ELOFTR_PYTHON=python3" >&2
   echo "  ELOFTR_WEIGHTS=/abs/path/eloftr_outdoor.ckpt" >&2
   echo "  ELOFTR_DEVICE=cuda|cpu" >&2
+  echo "  ELOFTR_MATCH_COARSE_THR=0.1" >&2
   echo "  ZMQ_ENDPOINT=tcp://127.0.0.1:5555" >&2
 }
 
@@ -85,7 +87,8 @@ echo "[CorrInit] Starting LoFTR sidecar..."
 "$ELOFTR_PYTHON" "$ROOT/scripts/efficientloftr_service.py" \
   --endpoint "$ZMQ_ENDPOINT" \
   --weights "$ELOFTR_WEIGHTS" \
-  --device "$ELOFTR_DEVICE" >"$LOFTR_LOG" 2>&1 &
+  --device "$ELOFTR_DEVICE" \
+  --match_coarse_thr "$ELOFTR_MATCH_COARSE_THR" >"$LOFTR_LOG" 2>&1 &
 
 LOFTR_PID=$!
 cleanup() { kill "$LOFTR_PID" 2>/dev/null || true; }
