@@ -15,14 +15,22 @@
 
 #include "include/gaussian_model.h"
 
-#include <cstdint>
+#include <utility>
 
 namespace
 {
-inline std::string tensorKey(const torch::Tensor& tensor)
+inline void* tensorKey(const torch::Tensor& tensor)
 {
-    auto* impl = tensor.unsafeGetTensorImpl();
-    return std::to_string(reinterpret_cast<std::uintptr_t>(impl));
+    return static_cast<void*>(tensor.unsafeGetTensorImpl());
+}
+
+inline std::vector<torch::Tensor> tensorVec2(torch::Tensor a, torch::Tensor b)
+{
+    std::vector<torch::Tensor> v;
+    v.reserve(2);
+    v.push_back(std::move(a));
+    v.push_back(std::move(b));
+    return v;
 }
 } // namespace
 
@@ -73,7 +81,7 @@ torch::Tensor GaussianModel::getXYZ()
 
 torch::Tensor GaussianModel::getFeatures()
 {
-    return torch::cat(std::vector<torch::Tensor>{this->features_dc_.clone(), this->features_rest_.clone()}, /*dim=*/1);
+    return torch::cat(tensorVec2(this->features_dc_.clone(), this->features_rest_.clone()), /*dim=*/1);
 }
 
 torch::Tensor GaussianModel::getOpacityActivation()
@@ -224,8 +232,8 @@ void GaussianModel::increasePcd(std::vector<float> points, std::vector<float> co
         sparse_points_color_ = new_colors;
     }
     else {
-        sparse_points_xyz_ = torch::cat(std::vector<torch::Tensor>{sparse_points_xyz_, new_point_cloud}, /*dim=*/0);
-        sparse_points_color_ = torch::cat(std::vector<torch::Tensor>{sparse_points_color_, new_colors}, /*dim=*/0);
+        sparse_points_xyz_ = torch::cat(tensorVec2(sparse_points_xyz_, new_point_cloud), /*dim=*/0);
+        sparse_points_color_ = torch::cat(tensorVec2(sparse_points_color_, new_colors), /*dim=*/0);
     }
 
     torch::Tensor new_fused_colors = sh_utils::RGB2SH(new_colors);
@@ -311,8 +319,8 @@ void GaussianModel::increasePcd(torch::Tensor& new_point_cloud, torch::Tensor& n
         sparse_points_color_ = new_colors;
     }
     else {
-        sparse_points_xyz_ = torch::cat(std::vector<torch::Tensor>{sparse_points_xyz_, new_point_cloud}, /*dim=*/0);
-        sparse_points_color_ = torch::cat(std::vector<torch::Tensor>{sparse_points_color_, new_colors}, /*dim=*/0);
+        sparse_points_xyz_ = torch::cat(tensorVec2(sparse_points_xyz_, new_point_cloud), /*dim=*/0);
+        sparse_points_color_ = torch::cat(tensorVec2(sparse_points_color_, new_colors), /*dim=*/0);
     }
 
     torch::Tensor new_fused_colors = sh_utils::RGB2SH(new_colors);
@@ -684,22 +692,22 @@ void GaussianModel::densificationPostfix(
             auto new_state = std::make_unique<torch::optim::AdamParamState>();
             new_state->step(stored_state.step());
             new_state->exp_avg(torch::cat(
-                std::vector<torch::Tensor>{stored_state.exp_avg().clone(), torch::zeros_like(extension_tensor)},
+                tensorVec2(stored_state.exp_avg().clone(), torch::zeros_like(extension_tensor)),
                 /*dim=*/0));
             new_state->exp_avg_sq(torch::cat(
-                std::vector<torch::Tensor>{stored_state.exp_avg_sq().clone(), torch::zeros_like(extension_tensor)},
+                tensorVec2(stored_state.exp_avg_sq().clone(), torch::zeros_like(extension_tensor)),
                 /*dim=*/0));
             // new_state->max_exp_avg_sq(stored_state.max_exp_avg_sq().clone());  // needed only when options.amsgrad(true), which is false by default
 
             state.erase(key);
-            param = torch::cat(std::vector<torch::Tensor>{param, extension_tensor}, /*dim=*/0).requires_grad_();
+            param = torch::cat(tensorVec2(param, extension_tensor), /*dim=*/0).requires_grad_();
             key = tensorKey(param);
             state[key] = std::move(new_state);
 
             optimizable_tensors[group_idx] = param;
         }
         else {
-            param = torch::cat(std::vector<torch::Tensor>{param, extension_tensor}, /*dim=*/0).requires_grad_();
+            param = torch::cat(tensorVec2(param, extension_tensor), /*dim=*/0).requires_grad_();
             optimizable_tensors[group_idx] = param;
         }
     }
@@ -722,7 +730,7 @@ void GaussianModel::densificationPostfix(
     GAUSSIAN_MODEL_TENSORS_TO_VEC
 
     this->exist_since_iter_ = torch::cat(
-        std::vector<torch::Tensor>{this->exist_since_iter_, new_exist_since_iter},
+        tensorVec2(this->exist_since_iter_, new_exist_since_iter),
         /*dim=*/0);
 
     this->xyz_gradient_accum_ = torch::zeros({this->getXYZ().size(0), 1}, torch::TensorOptions().device(device_type_));
@@ -771,11 +779,11 @@ void GaussianModel::densifyAndSplit(
     );
 
     auto prune_filter = torch::cat(
-        std::vector<torch::Tensor>{
+        tensorVec2(
             selected_pts_mask,
             torch::zeros({(N * selected_pts_mask.sum()).item<int>()},
                 torch::TensorOptions().device(device_type_).dtype(torch::kBool))
-        });
+        ));
     this->prunePoints(prune_filter);
 }
 
