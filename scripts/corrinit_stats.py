@@ -121,6 +121,12 @@ def main():
         default=None,
         help="Optional annotated CSV (per-task, derived ratios and limit reason).",
     )
+    parser.add_argument(
+        "--num_seeds",
+        type=int,
+        default=None,
+        help="Optional target num_seeds to evaluate coverage (e.g., 4096).",
+    )
     args = parser.parse_args()
 
     csv_path = Path(args.csv)
@@ -240,6 +246,10 @@ def main():
     # Warnings / heuristics
     oprint("Heuristics / Warnings")
     if task_rows:
+        # Determine target seeds threshold
+        max_seeds_out = int(max((r["seeds_out"] or 0) for r in task_rows)) if task_rows else 0
+        target_seeds = args.num_seeds if args.num_seeds is not None else max_seeds_out
+
         low_matches = [r for r in task_rows if (r.get("matches_raw") or 0) < 100]
         zero_seeds = [r for r in task_rows if (r.get("seeds_out") or 0) == 0]
         over_lim = [
@@ -251,6 +261,20 @@ def main():
         oprint(f"  tasks_with_matches_raw<100: {len(low_matches)}")
         oprint(f"  tasks_with_seeds_out==0: {len(zero_seeds)}")
         oprint(f"  oversample_limit_hits: {len(over_lim)}")
+
+        # Coverage check for target seeds
+        enough_matches = [r for r in task_rows if (r.get("matches_in_bounds") or 0) >= target_seeds]
+        enough_oversample = [r for r in task_rows if (r.get("oversample") or 0) >= target_seeds]
+        enough_reproj = [r for r in task_rows if (r.get("reproj_pass") or 0) >= target_seeds]
+        enough_parallax = [r for r in task_rows if (r.get("parallax_pass") or 0) >= target_seeds]
+        enough_seeds = [r for r in task_rows if (r.get("seeds_out") or 0) >= target_seeds]
+        oprint(f"  target_num_seeds: {target_seeds}")
+        oprint(f"  tasks_with_matches_in_bounds>=target: {len(enough_matches)}")
+        oprint(f"  tasks_with_oversample>=target: {len(enough_oversample)}")
+        oprint(f"  tasks_with_reproj_pass>=target: {len(enough_reproj)}")
+        oprint(f"  tasks_with_parallax_pass>=target: {len(enough_parallax)}")
+        oprint(f"  tasks_with_seeds_out>=target: {len(enough_seeds)}")
+
         q_vals = [r.get("queue_size") for r in task_rows if r.get("queue_size") is not None]
         if q_vals and pct(q_vals, 0.9) > 0:
             oprint(f"  queue_backlog_p90: {fmt_num(pct(q_vals, 0.9))}")
@@ -294,7 +318,9 @@ def main():
             "ratio_seeds_parallax",
             "limit_reason",
         ]
-        num_seeds = int(max((r["seeds_out"] or 0) for r in task_rows)) if task_rows else 0
+        num_seeds = args.num_seeds if args.num_seeds is not None else int(
+            max((r["seeds_out"] or 0) for r in task_rows)
+        ) if task_rows else 0
 
         def classify(r):
             seeds = r["seeds_out"] or 0

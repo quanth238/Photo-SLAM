@@ -92,7 +92,7 @@ GaussianViewer.camera_watch_dist: 0.000001
 # CorrInit (LoFTR) Parameters
 #--------------------------------------------------------------------------------------------
 CorrInit.enable: 1
-CorrInit.neighbor_k: 1
+CorrInit.neighbor_k: 3
 CorrInit.neighbor_candidates: 10
 CorrInit.num_seeds: 4096
 CorrInit.num_oversample: 16384
