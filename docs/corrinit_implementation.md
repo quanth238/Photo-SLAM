@@ -244,8 +244,16 @@ pip install -r reference/EfficientLoFTR/requirements.txt
 ```
 
 Ensure LoFTR weights are available:
+- **Weights are not included in this repo.** You must download them from the official EfficientLoFTR release/model‑zoo.
+- The expected filename is `eloftr_outdoor.ckpt` (as shown in the EfficientLoFTR README).
+- Create a local `weights/` folder at repo root and place the file there:
+```
+mkdir -p weights
+# Download the official eloftr_outdoor.ckpt into weights/
+# (use the official EfficientLoFTR release URL)
+```
 - Default expected path by the service: `weights/eloftr_outdoor.ckpt`
-- You can override with `--weights` argument.
+- You can override with `--weights` argument or `ELOFTR_WEIGHTS` env.
 
 ## 3) Start LoFTR Sidecar Service
 
