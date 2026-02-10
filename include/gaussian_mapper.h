@@ -27,6 +27,7 @@
 #include <ctime>
 #include <sstream>
 #include <thread>
+#include <memory>
 #include <filesystem>
 #include <map>
 #include <random>
@@ -48,6 +49,7 @@
 #include "gaussian_keyframe.h"
 #include "gaussian_scene.h"
 #include "gaussian_trainer.h"
+#include "corr_init_worker.h"
 
 #define CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(dir)                                       \
     if (!dir.empty() && !std::filesystem::exists(dir))                                      \
@@ -139,6 +141,7 @@ public:
     bool isKeepingTraining();
     bool isdoingGausPyramidTraining();
     bool isdoingInactiveGeoDensify();
+    bool isCorrInitEnabled();
 
     void setPositionLearningRateInit(const float lr);
     void setFeatureLearningRate(const float lr);
@@ -155,6 +158,7 @@ public:
     void setKeepTraining(const bool keep);
     void setDoGausPyramidTraining(const bool gaus_pyramid);
     void setDoInactiveGeoDensify(const bool inactive_geo_densify);
+    void setCorrInitEnable(const bool enable);
 
     VariableParameters getVaribleParameters();
     void setVaribleParameters(const VariableParameters &params);
@@ -188,6 +192,10 @@ protected:
 
     void increasePcdByKeyframeInactiveGeoDensify(
         std::shared_ptr<GaussianKeyframe> pkf);
+
+    // CorrInit helpers
+    ORB_SLAM3::KeyFrame* findOrbKeyframeById(unsigned long kfid);
+    void maybeEnqueueCorrInitTask(std::shared_ptr<GaussianKeyframe> pkf);
 
     // bool needInterruptTraining();
     // void setInterruptTraining(const bool interrupt_training);
@@ -289,6 +297,21 @@ protected:
     int max_depth_cached_ = 1;
     torch::Tensor depth_cache_points_;
     torch::Tensor depth_cache_colors_;
+
+    // CorrInit settings (triangulation-based densification)
+    bool corrinit_enable_ = false;
+    int corrinit_neighbor_k_ = 1;
+    int corrinit_neighbor_candidates_ = 10;
+    int corrinit_num_seeds_ = 512;
+    int corrinit_num_oversample_ = 2048;
+    float corrinit_reproj_err_px_ = 3.0f;
+    float corrinit_min_parallax_deg_ = 1.0f;
+    int corrinit_queue_capacity_ = 8;
+    std::string corrinit_zmq_endpoint_ = "tcp://127.0.0.1:5555";
+    std::string corrinit_log_path_;
+    bool corrinit_stereo_rectified_ = false;
+    bool corrinit_stereo_warned_ = false;
+    std::unique_ptr<CorrInitWorker> corrinit_worker_;
 
     unsigned long min_num_initial_map_kfs_;
     torch::Tensor background_;

@@ -34,6 +34,8 @@ find_package(glfw3 REQUIRED)
 
 find_package(realsense2)
 
+option(WITH_CORRINIT_ZMQ "Enable ZeroMQ for CorrInit" OFF)
+
 set(ORB_SLAM3_SOURCE_DIR "${PROJECT_SOURCE_DIR}/ORB-SLAM3")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
@@ -124,6 +126,8 @@ add_library(gaussian_mapper SHARED
     include/gaussian_scene.h
     include/gaussian_trainer.h
     include/gaussian_mapper.h
+    include/triangulator.h
+    include/corr_init_worker.h
     include/general_utils.h
     include/graphics_utils.h
     include/loss_utils.h
@@ -141,7 +145,20 @@ add_library(gaussian_mapper SHARED
     src/gaussian_renderer.cpp
     src/gaussian_scene.cpp
     src/gaussian_trainer.cpp
-    src/gaussian_mapper.cpp)
+    src/gaussian_mapper.cpp
+    src/triangulator.cpp
+    src/corr_init_worker.cpp)
+
+if(WITH_CORRINIT_ZMQ)
+    add_definitions(-DWITH_CORRINIT_ZMQ)
+    find_path(ZMQ_INCLUDE_DIR zmq.hpp)
+    find_library(ZMQ_LIB zmq)
+    if(NOT ZMQ_INCLUDE_DIR OR NOT ZMQ_LIB)
+        message(FATAL_ERROR "ZeroMQ not found. Install cppzmq (zmq.hpp) and libzmq, or disable WITH_CORRINIT_ZMQ.")
+    endif()
+    target_include_directories(gaussian_mapper PRIVATE ${ZMQ_INCLUDE_DIR})
+    target_link_libraries(gaussian_mapper ${ZMQ_LIB})
+endif()
 target_link_libraries(gaussian_mapper
     ${ORB_SLAM3_SOURCE_DIR}/lib/libORB_SLAM3.so
     ${OpenCV_LIBRARIES}

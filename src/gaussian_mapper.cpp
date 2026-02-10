@@ -18,6 +18,54 @@
 
 #include "include/gaussian_mapper.h"
 
+#include <cassert>
+
+namespace
+{
+long long nowMsForLog()
+{
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+
+void appendCorrInitGuardLog(const std::string& log_path, const std::string& event, const std::string& note)
+{
+    if (log_path.empty())
+        return;
+    try {
+        std::filesystem::path path(log_path);
+        if (path.has_parent_path())
+            std::filesystem::create_directories(path.parent_path());
+        bool need_header = true;
+        if (std::filesystem::exists(path)) {
+            auto fsize = std::filesystem::file_size(path);
+            need_header = (fsize == 0);
+        }
+        std::ofstream log_file(path, std::ios::out | std::ios::app);
+        if (!log_file.is_open())
+            return;
+        if (need_header) {
+            log_file
+                << "timestamp_ms,event,ref_kfid,neighbor_kfid,"
+                << "matches_raw,matches_in_bounds,oversample,triangulated,"
+                << "cheirality_pass,reproj_pass,parallax_pass,seeds_out,"
+                << "median_reproj,p90_reproj,median_parallax,p90_parallax,"
+                << "task_ms,queue_size,iter,note"
+                << "\n";
+        }
+        log_file << nowMsForLog() << ","
+                 << event << ",0,0,"
+                 << "-1,-1,-1,-1,-1,-1,-1,0,"
+                 << "0,0,0,0,0,0,-1,"
+                 << "\"" << note << "\""
+                 << "\n";
+    }
+    catch (...) {
+        return;
+    }
+}
+} // namespace
+
 GaussianMapper::GaussianMapper(
     std::shared_ptr<ORB_SLAM3::System> pSLAM,
     std::filesystem::path gaussian_config_file_path,
@@ -55,6 +103,7 @@ GaussianMapper::GaussianMapper(
 
     result_dir_ = result_dir;
     CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(result_dir)
+    corrinit_log_path_ = (result_dir_ / "corrinit_log.csv").string();
     config_file_path_ = gaussian_config_file_path;
     readConfigFromFile(gaussian_config_file_path);
 
@@ -227,6 +276,39 @@ GaussianMapper::GaussianMapper(
         }
         this->scene_->addCamera(camera);
     }
+
+    // CorrInit guard: only support pinhole cameras
+    if (corrinit_enable_) {
+        bool all_pinhole = true;
+        for (const auto& kv : scene_->cameras_) {
+            if (kv.second.model_id_ != Camera::CameraModelType::PINHOLE) {
+                all_pinhole = false;
+                break;
+            }
+        }
+        if (!all_pinhole) {
+            corrinit_enable_ = false;
+            appendCorrInitGuardLog(corrinit_log_path_, "guard_disable", "non_pinhole_camera");
+        }
+    }
+
+#ifdef WITH_CORRINIT_ZMQ
+    if (corrinit_enable_) {
+        corrinit_worker_ = std::make_unique<CorrInitWorker>(
+            corrinit_zmq_endpoint_,
+            corrinit_log_path_,
+            corrinit_queue_capacity_,
+            corrinit_num_seeds_,
+            corrinit_num_oversample_,
+            corrinit_reproj_err_px_,
+            corrinit_min_parallax_deg_);
+        corrinit_worker_->start();
+    }
+#else
+    if (corrinit_enable_) {
+        corrinit_enable_ = false;
+    }
+#endif
 }
 
 void GaussianMapper::readConfigFromFile(std::filesystem::path cfg_path)
@@ -266,6 +348,34 @@ void GaussianMapper::readConfigFromFile(std::filesystem::path cfg_path)
         settings_file["RGBD.min_depth"].operator float();
     RGBD_max_depth_ =
         settings_file["RGBD.max_depth"].operator float();
+
+    // CorrInit (triangulation-based densification)
+    if (!settings_file["CorrInit.enable"].empty())
+        corrinit_enable_ = (settings_file["CorrInit.enable"].operator int()) != 0;
+    if (!settings_file["CorrInit.neighbor_k"].empty())
+        corrinit_neighbor_k_ = settings_file["CorrInit.neighbor_k"].operator int();
+    if (!settings_file["CorrInit.neighbor_candidates"].empty())
+        corrinit_neighbor_candidates_ = settings_file["CorrInit.neighbor_candidates"].operator int();
+    if (!settings_file["CorrInit.num_seeds"].empty())
+        corrinit_num_seeds_ = settings_file["CorrInit.num_seeds"].operator int();
+    if (!settings_file["CorrInit.num_oversample"].empty())
+        corrinit_num_oversample_ = settings_file["CorrInit.num_oversample"].operator int();
+    if (!settings_file["CorrInit.reproj_err_px"].empty())
+        corrinit_reproj_err_px_ = settings_file["CorrInit.reproj_err_px"].operator float();
+    if (!settings_file["CorrInit.min_parallax_deg"].empty())
+        corrinit_min_parallax_deg_ = settings_file["CorrInit.min_parallax_deg"].operator float();
+    if (!settings_file["CorrInit.queue_capacity"].empty())
+        corrinit_queue_capacity_ = settings_file["CorrInit.queue_capacity"].operator int();
+    if (!settings_file["CorrInit.zmq_endpoint"].empty())
+        corrinit_zmq_endpoint_ = settings_file["CorrInit.zmq_endpoint"].operator std::string();
+    if (!settings_file["CorrInit.stereo_rectified"].empty())
+        corrinit_stereo_rectified_ = (settings_file["CorrInit.stereo_rectified"].operator int()) != 0;
+    if (!settings_file["CorrInit.log_path"].empty()) {
+        std::filesystem::path log_path = settings_file["CorrInit.log_path"].operator std::string();
+        if (log_path.is_relative())
+            log_path = result_dir_ / log_path;
+        corrinit_log_path_ = log_path.string();
+    }
 
     inactive_geo_densify_ =
         (settings_file["Mapper.inactive_geo_densify"].operator int()) != 0;
@@ -649,6 +759,32 @@ void GaussianMapper::trainForOneIteration()
     // Mutex lock for usage of the gaussian model
     std::unique_lock<std::mutex> lock_render(mutex_render_);
 
+    // Integrate CorrInit seeds (triangulation-based densification)
+    if (corrinit_worker_) {
+        torch::NoGradGuard no_grad;
+        CorrInitSeedPacket packet;
+        while (corrinit_worker_->tryPopSeedPacket(packet)) {
+            if (packet.points.empty())
+                continue;
+            std::vector<float> points;
+            std::vector<float> colors;
+            points.reserve(packet.points.size() * 3);
+            colors.reserve(packet.colors.size() * 3);
+            for (std::size_t i = 0; i < packet.points.size(); ++i) {
+                const auto& p = packet.points[i];
+                points.push_back(p.x());
+                points.push_back(p.y());
+                points.push_back(p.z());
+                const auto& c = packet.colors[i];
+                colors.push_back(c[0]);
+                colors.push_back(c[1]);
+                colors.push_back(c[2]);
+            }
+            gaussians_->increasePcd(points, colors, getIteration());
+            corrinit_worker_->logIntegration(packet, getIteration());
+        }
+    }
+
     // Every 1000 its we increase the levels of SH up to a maximum degree
     if (getIteration() % 1000 == 0 && default_sh_ < model_params_.sh_degree_)
         default_sh_ += 1;
@@ -783,6 +919,10 @@ void GaussianMapper::signalStop(const bool going_to_stop)
 {
     std::unique_lock<std::mutex> lock_status(this->mutex_status_);
     this->stopped_ = going_to_stop;
+
+    if (going_to_stop && corrinit_worker_) {
+        corrinit_worker_->stop();
+    }
 }
 
 bool GaussianMapper::hasMetInitialMappingConditions()
@@ -1098,6 +1238,9 @@ void GaussianMapper::handleNewKeyframe(
                 tensor_utils::cvMat2TorchTensor_Float32(img_resized, device_type_);
         }
     }
+
+    // CorrInit task (triangulation-based densification)
+    maybeEnqueueCorrInitTask(pkf);
 }
 
 void GaussianMapper::generateKfidRandomShuffle()
@@ -1472,6 +1615,98 @@ void GaussianMapper::increasePcdByKeyframeInactiveGeoDensify(
 //             << completion_time
 //             << " ms"
 //             << std::endl;
+}
+
+ORB_SLAM3::KeyFrame* GaussianMapper::findOrbKeyframeById(unsigned long kfid)
+{
+    if (!pSLAM_)
+        return nullptr;
+    auto pMap = pSLAM_->getAtlas()->GetCurrentMap();
+    if (!pMap)
+        return nullptr;
+    auto vKFs = pMap->GetAllKeyFrames();
+    for (auto* pKF : vKFs) {
+        if (pKF && pKF->mnId == kfid)
+            return pKF;
+    }
+    return nullptr;
+}
+
+void GaussianMapper::maybeEnqueueCorrInitTask(std::shared_ptr<GaussianKeyframe> pkf)
+{
+    if (!corrinit_enable_ || !corrinit_worker_ || !pkf)
+        return;
+
+    if (sensor_type_ == STEREO && !corrinit_stereo_rectified_) {
+        if (!corrinit_stereo_warned_) {
+            appendCorrInitGuardLog(corrinit_log_path_, "guard_disable", "stereo_requires_rectified");
+            corrinit_stereo_warned_ = true;
+        }
+        assert(corrinit_stereo_rectified_ && "CorrInit requires rectified stereo images");
+        return;
+    }
+
+    ORB_SLAM3::KeyFrame* pKF = findOrbKeyframeById(pkf->fid_);
+    if (!pKF)
+        return;
+
+    auto covisibles = pKF->GetBestCovisibilityKeyFrames(corrinit_neighbor_candidates_);
+    if (covisibles.empty())
+        return;
+
+    // Select neighbors with largest baseline
+    Eigen::Vector3f Cw_ref = pKF->GetCameraCenter();
+    struct NeighborCandidate
+    {
+        ORB_SLAM3::KeyFrame* kf = nullptr;
+        float baseline = 0.0f;
+    };
+    std::vector<NeighborCandidate> candidates;
+    candidates.reserve(covisibles.size());
+    for (auto* kf : covisibles) {
+        if (!kf || kf->mnId == pkf->fid_)
+            continue;
+        Eigen::Vector3f Cw_nb = kf->GetCameraCenter();
+        float base = (Cw_ref - Cw_nb).norm();
+        candidates.push_back({kf, base});
+    }
+    if (candidates.empty())
+        return;
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const NeighborCandidate& a, const NeighborCandidate& b) {
+                  return a.baseline > b.baseline;
+              });
+
+    CorrInitTask task;
+    task.ref.kfid = pkf->fid_;
+    task.ref.camera_id = pkf->camera_id_;
+    task.ref.Tcw = pkf->getPosef();
+    task.ref.intr = pkf->intr_;
+    task.ref.image_undist = pkf->img_undist_.clone();
+
+    int k = std::min(corrinit_neighbor_k_, static_cast<int>(candidates.size()));
+    task.neighbors.reserve(k);
+    for (int i = 0; i < k; ++i) {
+        auto* nb_kf = candidates[i].kf;
+        if (!nb_kf)
+            continue;
+        auto nb_gkf = scene_->getKeyframe(nb_kf->mnId);
+        if (!nb_gkf)
+            continue;
+        KeyframeSnapshot nb;
+        nb.kfid = nb_gkf->fid_;
+        nb.camera_id = nb_gkf->camera_id_;
+        nb.Tcw = nb_gkf->getPosef();
+        nb.intr = nb_gkf->intr_;
+        nb.image_undist = nb_gkf->img_undist_.clone();
+        task.neighbors.push_back(std::move(nb));
+    }
+
+    if (task.neighbors.empty())
+        return;
+
+    corrinit_worker_->enqueueTask(std::move(task));
 }
 
 // bool GaussianMapper::needInterruptTraining()
@@ -1858,6 +2093,11 @@ bool GaussianMapper::isdoingInactiveGeoDensify()
     std::unique_lock<std::mutex> lock(mutex_settings_);
     return inactive_geo_densify_;
 }
+bool GaussianMapper::isCorrInitEnabled()
+{
+    std::unique_lock<std::mutex> lock(mutex_settings_);
+    return corrinit_enable_;
+}
 
 void GaussianMapper::setPositionLearningRateInit(const float lr)
 {
@@ -1934,6 +2174,11 @@ void GaussianMapper::setDoInactiveGeoDensify(const bool inactive_geo_densify)
 {
     std::unique_lock<std::mutex> lock(mutex_settings_);
     inactive_geo_densify_ = inactive_geo_densify;
+}
+void GaussianMapper::setCorrInitEnable(const bool enable)
+{
+    std::unique_lock<std::mutex> lock(mutex_settings_);
+    corrinit_enable_ = enable;
 }
 
 VariableParameters GaussianMapper::getVaribleParameters()
