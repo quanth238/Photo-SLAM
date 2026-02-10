@@ -77,7 +77,7 @@ def loadPose(path):
         pose[:3, 3] = line[1:4]
         poses.append(pose)
     """
-    pose_data = np.loadtxt(path, delimiter=' ', dtype=np.unicode_)
+    pose_data = np.loadtxt(path, delimiter=' ', dtype=np.str_)
     pose_vecs = pose_data[:, 1:].astype(np.float32)
     tstamp = pose_data[:, 0].astype(np.float64)
     

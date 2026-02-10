@@ -18,15 +18,15 @@ args = parser.parse_args()
 dataset_center_path = args.dataset_center_path
 result_main_folder = args.result_main_folder
 
-gt_dataset = {"replica": {"path": os.path.join(dataset_center_path, "/Replica/"),
+gt_dataset = {"replica": {"path": os.path.join(dataset_center_path, "Replica"),
                            "scenes": ['office0', 'office1', 'office2', 'office3', 'office4', 'room0', 'room1', 'room2' ]}, 
-            "tum": {"path": os.path.join(dataset_center_path, "/TUM"),
+            "tum": {"path": os.path.join(dataset_center_path, "TUM"),
                     "scenes": ['rgbd_dataset_freiburg3_long_office_household', 'rgbd_dataset_freiburg2_xyz', 'rgbd_dataset_freiburg1_desk']},
-            "eth3d": {"path": os.path.join(dataset_center_path, "/ETH3D"),
+            "eth3d": {"path": os.path.join(dataset_center_path, "ETH3D"),
                         "scenes": ["desk_3", "mannequin_1", "mannequin_3", "planar_2", "planar_3", "table_7"]},
-            "kitti": {"path": os.path.join(dataset_center_path, "/KITTI"),
+            "kitti": {"path": os.path.join(dataset_center_path, "KITTI"),
                         "scenes": ["00", "01","02","03","04","05","06","07","08","09","10"]},
-            "euroc": {"path": os.path.join(dataset_center_path, "/EuRoC"),
+            "euroc": {"path": os.path.join(dataset_center_path, "EuRoC"),
                       "scenes": ["MH_01_easy", "MH_02_easy","V1_01_easy","V2_01_easy"]}
             }
 
@@ -42,6 +42,9 @@ for result in results:
     for scene in gt_dataset_scenes:
         result_path = os.path.join(result_main_folder, result, scene)
         gt_path = os.path.join(gt_dataset_path, scene)
+        if not os.path.exists(result_path):
+            print("skip missing result:", result_path)
+            continue
         if not os.path.exists(os.path.join(result_path, "eval.txt")):
             if "mono" in result.lower():
                 os.system("python run.py {} {} --correct_scale".format(result_path, gt_path))

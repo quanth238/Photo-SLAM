@@ -32,7 +32,7 @@ def loadTUM(path):
 def loadKITTI(path):
     color_paths = sorted(glob.glob(os.path.join(path, "image_2/*.png")))
     #print(path, color_paths)
-    tstamp = np.loadtxt(os.path.join(path, "times.txt"), delimiter=' ', dtype=np.unicode_).astype(np.float32)
+    tstamp = np.loadtxt(os.path.join(path, "times.txt"), delimiter=' ', dtype=np.str_).astype(np.float32)
     #tstamp = [float(color_path.split("/")[-1].replace("frame", "").replace(".jpg", "").replace(".png", "")) for color_path in color_paths]
     return color_paths, tstamp
 
@@ -64,27 +64,39 @@ if __name__ == "__main__":
     gaussians = GaussianModel(sh_degree)
     bg_color = [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+    if not os.path.isdir(args.result_path):
+        print("skip missing result_path:", args.result_path)
+        sys.exit(0)
     dirs = os.listdir(args.result_path)
     # load model
     width, height, fovx, fovy = 0,0,0,0
     ts = []
     Rs = []
     render_time = 0
+    found_model = False
     for file_name in dirs:
         #print(file_name)
         if "shutdown" in file_name:
             iter = file_name.split("_")[0]
             ply_path = os.path.join(args.result_path, file_name, "ply/point_cloud/iteration_{}".format(iter), "point_cloud.ply")
+            if not os.path.exists(ply_path):
+                continue
+            cameras_json = os.path.join(args.result_path, file_name, "ply", "cameras.json")
+            if not os.path.exists(cameras_json):
+                continue
             gaussians.load_ply(ply_path)
-            with open (os.path.join(args.result_path, file_name, "ply", "cameras.json"), "r") as fin:
+            with open(cameras_json, "r") as fin:
                 camera_paras = json.load(fin)
             #print(camera_paras[0])
             width, height, fx, fy = camera_paras[0]["width"], camera_paras[0]["height"], camera_paras[0]["fx"], camera_paras[0]["fy"]
             fovx = focal2fov(fx, width)
             fovy = focal2fov(fy, height)
-            
-            render_time = np.loadtxt(os.path.join(args.result_path, file_name, "render_time.txt"), delimiter=' ', dtype=np.unicode_)
-            render_time = render_time[:, 1].astype(np.float32)
+            found_model = True
+            try:
+                render_time = np.loadtxt(os.path.join(args.result_path, file_name, "render_time.txt"), delimiter=' ', dtype=np.str_)
+                render_time = render_time[:, 1].astype(np.float32)
+            except Exception:
+                render_time = 0
             """ 
             for camera_para in camera_paras:
                 ts.append(camera_para["position"])
@@ -110,9 +122,21 @@ if __name__ == "__main__":
     
     ## render and evaluation
     pose_path = os.path.join(args.result_path, "CameraTrajectory_TUM.txt")
+    if not os.path.exists(pose_path):
+        print("skip missing pose file:", pose_path)
+        sys.exit(0)
     poses, tstamp = loadPose(pose_path)
+    if len(tstamp) == 0 or len(poses) == 0:
+        print("skip empty pose data:", pose_path)
+        sys.exit(0)
     #print(gt_tstamp)
+    if len(gt_tstamp) == 0:
+        print("skip empty gt timestamps:", args.gt_path)
+        sys.exit(0)
     associations = associate_frames(tstamp, gt_tstamp)
+    if len(associations) == 0:
+        print("skip empty associations:", args.result_path)
+        sys.exit(0)
     distortion, K = None, None
     crop_edge = 0
     if os.path.isfile(os.path.join(args.gt_path, "camera.yaml")):
@@ -186,7 +210,7 @@ if __name__ == "__main__":
         tracking_time = fin.readlines()
     #print(tracking_time)
     tracking_time = np.array(tracking_time[:-3]).astype(np.float32)
-    #tracking_time = np.loadtxt(os.path.join(args.result_path, "TrackingTime.txt"), delimiter=' ', dtype=np.unicode_)
+    #tracking_time = np.loadtxt(os.path.join(args.result_path, "TrackingTime.txt"), delimiter=' ', dtype=np.str_)
     #tracking_time = tracking_time[:-3].astype(np.float32) # supposed last three lines is comment
     #np.savetxt(os.path.join(args.result_path, "renderng_time.txt"), time_list)
     #np.savetxt(os.path.join(args.result_path, "eval.txt"), [np.mean(psnr_list), np.mean(ssim_list), np.mean(lpips_list)])
@@ -279,3 +303,6 @@ if __name__ == "__main__":
         }
         plot.trajectories(fig, traj_by_label, plot.PlotMode.xyz)
         plt.show()
+    if not found_model or width == 0 or height == 0:
+        print("skip missing render outputs for:", args.result_path)
+        sys.exit(0)
