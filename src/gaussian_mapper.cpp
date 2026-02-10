@@ -1026,9 +1026,11 @@ void GaussianMapper::combineMappingOperations()
                 // In case new points are added in handleNewKeyframe()
                 int64_t num_new_points = gaussians_->xyz_.size(0) - point_not_transformed_flags.size(0);
                 if (num_new_points > 0)
-                    point_not_transformed_flags = torch::cat({
-                        point_not_transformed_flags,
-                        torch::full({num_new_points}, true, point_not_transformed_flags.options())},
+                    point_not_transformed_flags = torch::cat(
+                        std::vector<torch::Tensor>{
+                            point_not_transformed_flags,
+                            torch::full({num_new_points}, true, point_not_transformed_flags.options())
+                        },
                         /*dim=*/0);
                 // If kf is already in the scene, evaluate the change in pose,
                 // if too large we perform loop correction on its visible model points.
@@ -1411,8 +1413,12 @@ void GaussianMapper::increasePcdByKeyframeInactiveGeoDensify(
             depth_cache_colors_ = colors_valid;
         }
         else {
-            depth_cache_points_ = torch::cat({depth_cache_points_, points3D_valid}, /*dim=*/0);
-            depth_cache_colors_ = torch::cat({depth_cache_colors_, colors_valid}, /*dim=*/0);
+            depth_cache_points_ = torch::cat(
+                std::vector<torch::Tensor>{depth_cache_points_, points3D_valid},
+                /*dim=*/0);
+            depth_cache_colors_ = torch::cat(
+                std::vector<torch::Tensor>{depth_cache_colors_, colors_valid},
+                /*dim=*/0);
         }
 // savePly(result_dir_ / (std::to_string(getIteration()) + "_" + std::to_string(pkf->fid_) + "_1_after_inactive_geo_densify"));
     }
@@ -1511,8 +1517,12 @@ void GaussianMapper::increasePcdByKeyframeInactiveGeoDensify(
             depth_cache_colors_ = colors_valid;
         }
         else {
-            depth_cache_points_ = torch::cat({depth_cache_points_, points3D_valid}, /*dim=*/0);
-            depth_cache_colors_ = torch::cat({depth_cache_colors_, colors_valid}, /*dim=*/0);
+            depth_cache_points_ = torch::cat(
+                std::vector<torch::Tensor>{depth_cache_points_, points3D_valid},
+                /*dim=*/0);
+            depth_cache_colors_ = torch::cat(
+                std::vector<torch::Tensor>{depth_cache_colors_, colors_valid},
+                /*dim=*/0);
         }
 // savePly(result_dir_ / (std::to_string(getIteration()) + "_" + std::to_string(pkf->fid_) + "_1_after_inactive_geo_densify"));
     }
@@ -1585,8 +1595,12 @@ void GaussianMapper::increasePcdByKeyframeInactiveGeoDensify(
             depth_cache_colors_ = colors_valid;
         }
         else {
-            depth_cache_points_ = torch::cat({depth_cache_points_, points3D_valid}, /*dim=*/0);
-            depth_cache_colors_ = torch::cat({depth_cache_colors_, colors_valid}, /*dim=*/0);
+            depth_cache_points_ = torch::cat(
+                std::vector<torch::Tensor>{depth_cache_points_, points3D_valid},
+                /*dim=*/0);
+            depth_cache_colors_ = torch::cat(
+                std::vector<torch::Tensor>{depth_cache_colors_, colors_valid},
+                /*dim=*/0);
         }
 // savePly(result_dir_ / (std::to_string(getIteration()) + "_" + std::to_string(pkf->fid_) + "_1_after_inactive_geo_densify"));
     }

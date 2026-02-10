@@ -1,44 +1,105 @@
+#!/bin/bash
+set -e  # dừng ngay nếu có lỗi
+
+# ============================================================
+# Environment Setup
+# ============================================================
+export CC=/usr/bin/gcc-12
+export CXX=/usr/bin/g++-12
+export CUDAHOSTCXX=/usr/bin/g++-12
+export CUDA_HOME=/usr/local/cuda-12.8
+export CUDA_ROOT=/usr/local/cuda-12.8
+export PATH=/usr/local/cuda-12.8/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
+
+# Common cmake flags
+CMAKE_FLAGS="\
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER=/usr/bin/gcc-12 \
+  -DCMAKE_CXX_COMPILER=/usr/bin/g++-12 \
+  -DCMAKE_CXX_FLAGS=-Wno-error=array-bounds \
+  -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda-12.8 \
+  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc \
+  -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-12 \
+  -DCUDA_HOST_COMPILER=/usr/bin/gcc-12 \
+  -DOpenCV_DIR=/usr/local/lib/cmake/opencv4"
+
+# ============================================================
 # DBoW2
+# ============================================================
+echo "========================================="
+echo "Building DBoW2 ..."
+echo "========================================="
 cd ./ORB-SLAM3/Thirdparty/DBoW2
-mkdir build
+rm -rf build && mkdir build
 cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release # add OpenCV_DIR definitions if needed, example:
-#cmake .. -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR=/home/rapidlab/libs/opencv/lib/cmake/opencv4
-make -j
+cmake .. $CMAKE_FLAGS
+make -j$(nproc)
 
-cd ../../g2o
-
+# ============================================================
 # g2o
-mkdir build
+# ============================================================
+echo "========================================="
+echo "Building g2o ..."
+echo "========================================="
+cd ../../g2o
+rm -rf build && mkdir build
 cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j
+cmake .. $CMAKE_FLAGS
+make -j$(nproc)
 
-cd ../../Sophus
-
+# ============================================================
 # Sophus
-mkdir build
+# ============================================================
+echo "========================================="
+echo "Building Sophus ..."
+echo "========================================="
+cd ../../Sophus
+rm -rf build && mkdir build
 cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j
+cmake .. \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER=/usr/bin/gcc-12 \
+  -DCMAKE_CXX_COMPILER=/usr/bin/g++-12 \
+  -DCMAKE_CXX_FLAGS="-Wno-error=array-bounds -Wno-array-bounds" \
+  -DBUILD_TESTS=OFF
+make -j$(nproc)
 
-# ORB_SLAM3
+# ============================================================
+# ORB-SLAM3 Vocabulary
+# ============================================================
+echo "========================================="
+echo "Uncompressing vocabulary ..."
+echo "========================================="
 cd ../../../Vocabulary
-echo "Uncompress vocabulary ..."
 tar -xf ORBvoc.txt.tar.gz
+echo "Vocabulary OK"
+
+# ============================================================
+# ORB-SLAM3
+# ============================================================
+echo "========================================="
+echo "Building ORB-SLAM3 ..."
+echo "========================================="
 cd ..
-
-mkdir build
+rm -rf build && mkdir build
 cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release # add OpenCV_DIR definitions if needed, example:
-#cmake .. -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR=/home/rapidlab/libs/opencv/lib/cmake/opencv4
+cmake .. $CMAKE_FLAGS
 make -j8
 
+# ============================================================
 # Photo-SLAM
+# ============================================================
+echo "========================================="
 echo "Building Photo-SLAM ..."
+echo "========================================="
 cd ../..
-mkdir build
+rm -rf build && mkdir build
 cd build
-cmake .. # add Torch_DIR and/or OpenCV_DIR definitions if needed, example:
-#cmake .. -DTorch_DIR=/home/rapidlab/libs/libtorch/share/cmake/Torch -DOpenCV_DIR=/home/rapidlab/libs/opencv/lib/cmake/opencv4
+cmake .. $CMAKE_FLAGS \
+  -DTorch_DIR=/home/crl/miniconda3/envs/photoslam/lib/python3.10/site-packages/torch/share/cmake/Torch
 make -j8
+
+echo "========================================="
+echo "Build hoàn tất! ✅"
+echo "========================================="
