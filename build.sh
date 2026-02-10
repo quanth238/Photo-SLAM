@@ -11,6 +11,9 @@ export CUDA_HOME=/usr/local/cuda-12.8
 export CUDA_ROOT=/usr/local/cuda-12.8
 export PATH=/usr/local/cuda-12.8/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
+# RTX 5090 (sm_120) support for custom CUDA kernels
+export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST:-12.0}
+CUDA_ARCH=${CUDA_ARCH:-120}
 
 # Common cmake flags
 CMAKE_FLAGS="\
@@ -22,6 +25,7 @@ CMAKE_FLAGS="\
   -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc \
   -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-12 \
   -DCUDA_HOST_COMPILER=/usr/bin/gcc-12 \
+  -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH} \
   -DOpenCV_DIR=/usr/local/lib/cmake/opencv4"
 
 # ============================================================

@@ -18,6 +18,8 @@
 
 #include <torch/torch.h>
 
+#include <cstdlib>
+
 #include <iostream>
 #include <algorithm>
 #include <fstream>
@@ -243,6 +245,13 @@ void saveTrackingTime(std::vector<float> &vTimesTrack, const std::string &strSav
 
 void saveGpuPeakMemoryUsage(std::filesystem::path pathSave)
 {
+    const char* env = std::getenv("PHOTOSLAM_GPU_STATS");
+    if (!env || std::string(env) != "1") {
+        return;
+    }
+    if (!torch::cuda::is_available()) {
+        return;
+    }
     namespace c10Alloc = c10::cuda::CUDACachingAllocator;
     c10Alloc::DeviceStats mem_stats = c10Alloc::getDeviceStats(0);
 
