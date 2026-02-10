@@ -57,6 +57,9 @@ public:
     CorrInitWorker(
         const std::string& zmq_endpoint,
         const std::string& log_path,
+        const std::string& debug_dir,
+        int debug_every_n,
+        int debug_max_tasks,
         int queue_capacity,
         int num_seeds,
         int num_oversample,
@@ -106,6 +109,11 @@ private:
 private:
     std::string zmq_endpoint_;
     std::string log_path_;
+    std::string debug_dir_;
+    int debug_every_n_ = 0;
+    int debug_max_tasks_ = 0;
+    std::atomic<int> debug_saved_{0};
+    std::size_t debug_task_index_ = 0;
     int queue_capacity_ = 8;
     int num_seeds_ = 512;
     int num_oversample_ = 2048;

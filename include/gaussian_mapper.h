@@ -309,6 +309,9 @@ protected:
     int corrinit_queue_capacity_ = 8;
     std::string corrinit_zmq_endpoint_ = "tcp://127.0.0.1:5555";
     std::string corrinit_log_path_;
+    std::string corrinit_debug_dir_;
+    int corrinit_debug_every_n_ = 0;
+    int corrinit_debug_max_tasks_ = 0;
     bool corrinit_stereo_rectified_ = false;
     bool corrinit_stereo_warned_ = false;
     std::unique_ptr<CorrInitWorker> corrinit_worker_;

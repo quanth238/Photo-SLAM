@@ -95,6 +95,8 @@ cd "$REPO_ROOT"
 export OPENCV_DIR="$OPENCV_PREFIX/lib/cmake/opencv4"
 export LD_LIBRARY_PATH="$OPENCV_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 
+# Clean stale build outputs to avoid loading old CUDA binaries
+rm -f "$REPO_ROOT/lib/"*.so || true
 rm -rf build && mkdir build && cd build
 
 cmake .. \

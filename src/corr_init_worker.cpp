@@ -16,6 +16,7 @@
 #include <sstream>
 
 #include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <jsoncpp/json/json.h>
 
 #include "include/triangulator.h"
@@ -34,6 +35,75 @@ cv::Mat toGrayU8(const cv::Mat& img_rgb_f32)
     cv::cvtColor(img_rgb_f32, gray_f32, cv::COLOR_RGB2GRAY);
     gray_f32.convertTo(gray_u8, CV_8UC1, 255.0);
     return gray_u8;
+}
+
+cv::Mat toBgrU8(const cv::Mat& img_rgb_f32)
+{
+    cv::Mat u8, bgr;
+    if (img_rgb_f32.empty())
+        return bgr;
+    if (img_rgb_f32.type() == CV_8UC3) {
+        cv::cvtColor(img_rgb_f32, bgr, cv::COLOR_RGB2BGR);
+        return bgr;
+    }
+    img_rgb_f32.convertTo(u8, CV_8UC3, 255.0);
+    cv::cvtColor(u8, bgr, cv::COLOR_RGB2BGR);
+    return bgr;
+}
+
+void writeMatchesCsv(const std::filesystem::path& path, const std::vector<Match2D>& matches)
+{
+    std::ofstream fout(path);
+    if (!fout.is_open())
+        return;
+    fout << "u0,v0,u1,v1,conf\n";
+    for (const auto& m : matches) {
+        fout << m.u0 << "," << m.v0 << "," << m.u1 << "," << m.v1 << "," << m.conf << "\n";
+    }
+}
+
+void writeTriCsv(const std::filesystem::path& path,
+    const std::vector<Match2D>& selected,
+    const std::vector<TriangulatedPoint>& tri_points)
+{
+    std::vector<float> err(selected.size(), -1.0f);
+    std::vector<float> parallax(selected.size(), -1.0f);
+    std::vector<int> valid(selected.size(), 0);
+    for (const auto& tp : tri_points) {
+        if (tp.match_idx >= selected.size())
+            continue;
+        err[tp.match_idx] = tp.reproj_err;
+        parallax[tp.match_idx] = tp.parallax_deg;
+        valid[tp.match_idx] = tp.valid ? 1 : 0;
+    }
+
+    std::ofstream fout(path);
+    if (!fout.is_open())
+        return;
+    fout << "u0,v0,u1,v1,conf,valid,reproj_err,parallax_deg\n";
+    for (std::size_t i = 0; i < selected.size(); ++i) {
+        const auto& m = selected[i];
+        fout << m.u0 << "," << m.v0 << "," << m.u1 << "," << m.v1 << ","
+             << m.conf << "," << valid[i] << "," << err[i] << "," << parallax[i] << "\n";
+    }
+}
+
+void drawMatchesPoints(cv::Mat& img, const std::vector<Match2D>& selected,
+    const std::vector<TriangulatedPoint>& tri_points, bool use_ref)
+{
+    if (img.empty())
+        return;
+    std::vector<int> valid(selected.size(), 0);
+    for (const auto& tp : tri_points) {
+        if (tp.match_idx < selected.size() && tp.valid)
+            valid[tp.match_idx] = 1;
+    }
+    for (std::size_t i = 0; i < selected.size(); ++i) {
+        const auto& m = selected[i];
+        cv::Point2f p(use_ref ? m.u0 : m.u1, use_ref ? m.v0 : m.v1);
+        cv::Scalar color = valid[i] ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255);
+        cv::circle(img, p, 2, color, -1, cv::LINE_AA);
+    }
 }
 
 bool parseHeaderJson(const std::string& json_str, int& num_matches)
@@ -75,6 +145,9 @@ std::string escapeCsv(const std::string& input)
 CorrInitWorker::CorrInitWorker(
     const std::string& zmq_endpoint,
     const std::string& log_path,
+    const std::string& debug_dir,
+    int debug_every_n,
+    int debug_max_tasks,
     int queue_capacity,
     int num_seeds,
     int num_oversample,
@@ -82,6 +155,9 @@ CorrInitWorker::CorrInitWorker(
     float min_parallax_deg)
     : zmq_endpoint_(zmq_endpoint),
       log_path_(log_path),
+      debug_dir_(debug_dir),
+      debug_every_n_(debug_every_n),
+      debug_max_tasks_(debug_max_tasks),
       queue_capacity_(queue_capacity),
       num_seeds_(num_seeds),
       num_oversample_(num_oversample),
@@ -386,6 +462,16 @@ bool CorrInitWorker::processTask(const CorrInitTask& task, CorrInitSeedPacket& o
     };
 
     for (const auto& nb : task.neighbors) {
+        bool do_debug = false;
+        std::size_t debug_idx = 0;
+        if (!debug_dir_.empty() && debug_every_n_ > 0) {
+            debug_idx = debug_task_index_++;
+            if ((debug_idx % static_cast<std::size_t>(debug_every_n_)) == 0) {
+                if (debug_max_tasks_ <= 0 || debug_saved_.load() < debug_max_tasks_)
+                    do_debug = true;
+            }
+        }
+
         cv::Mat img1 = toGrayU8(nb.image_undist);
         if (img1.empty()) {
             logTaskStats("task_fail", ref.kfid, nb.kfid,
@@ -536,6 +622,60 @@ bool CorrInitWorker::processTask(const CorrInitTask& task, CorrInitSeedPacket& o
         auto tri_points = Triangulator::triangulate(
             K0, ref.Tcw, K1, nb.Tcw,
             selected, reproj_err_px_, min_parallax_deg_, &stats);
+
+        if (do_debug) {
+            try {
+                std::filesystem::path out_dir = std::filesystem::path(debug_dir_) /
+                    ("ref_" + std::to_string(ref.kfid) + "_nb_" + std::to_string(nb.kfid) +
+                        "_i" + std::to_string(debug_idx));
+                std::filesystem::create_directories(out_dir);
+
+                // Save images
+                cv::Mat ref_bgr = toBgrU8(ref.image_undist);
+                cv::Mat nb_bgr = toBgrU8(nb.image_undist);
+                if (!ref_bgr.empty())
+                    cv::imwrite((out_dir / "ref.png").string(), ref_bgr);
+                if (!nb_bgr.empty())
+                    cv::imwrite((out_dir / "nb.png").string(), nb_bgr);
+
+                // Save overlay points
+                cv::Mat ref_vis = ref_bgr.clone();
+                cv::Mat nb_vis = nb_bgr.clone();
+                drawMatchesPoints(ref_vis, selected, tri_points, true);
+                drawMatchesPoints(nb_vis, selected, tri_points, false);
+                if (!ref_vis.empty())
+                    cv::imwrite((out_dir / "ref_points.png").string(), ref_vis);
+                if (!nb_vis.empty())
+                    cv::imwrite((out_dir / "nb_points.png").string(), nb_vis);
+
+                // CSVs
+                writeMatchesCsv(out_dir / "matches_in_bounds.csv", matches);
+                writeMatchesCsv(out_dir / "selected.csv", selected);
+                writeTriCsv(out_dir / "triangulated.csv", selected, tri_points);
+
+                // Meta
+                std::ofstream meta(out_dir / "meta.txt");
+                if (meta.is_open()) {
+                    meta << "ref_kfid=" << ref.kfid << "\n";
+                    meta << "nb_kfid=" << nb.kfid << "\n";
+                    meta << "matches_raw=" << num_matches << "\n";
+                    meta << "matches_in_bounds=" << matches.size() << "\n";
+                    meta << "selected=" << selected.size() << "\n";
+                    meta << "triangulated=" << stats.num_triangulated << "\n";
+                    meta << "cheirality_pass=" << stats.num_cheirality_pass << "\n";
+                    meta << "reproj_pass=" << stats.num_reproj_pass << "\n";
+                    meta << "parallax_pass=" << stats.num_parallax_pass << "\n";
+                    meta << "median_reproj=" << stats.median_reproj << "\n";
+                    meta << "p90_reproj=" << stats.p90_reproj << "\n";
+                    meta << "median_parallax=" << stats.median_parallax << "\n";
+                    meta << "p90_parallax=" << stats.p90_parallax << "\n";
+                }
+
+                debug_saved_.fetch_add(1);
+            }
+            catch (...) {
+            }
+        }
 
         int neighbor_valids = 0;
         for (std::size_t i = 0; i < tri_points.size(); ++i) {

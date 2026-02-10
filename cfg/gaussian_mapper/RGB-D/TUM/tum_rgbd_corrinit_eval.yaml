@@ -101,3 +101,6 @@ CorrInit.min_parallax_deg: 1.0
 CorrInit.queue_capacity: 8
 CorrInit.zmq_endpoint: "tcp://127.0.0.1:5555"
 CorrInit.log_path: "corrinit_log.csv"
+CorrInit.debug_dir: "corrinit_debug"
+CorrInit.debug_every_n: 1
+CorrInit.debug_max_tasks: 200

@@ -307,6 +307,9 @@ GaussianMapper::GaussianMapper(
         corrinit_worker_ = std::make_unique<CorrInitWorker>(
             corrinit_zmq_endpoint_,
             corrinit_log_path_,
+            corrinit_debug_dir_,
+            corrinit_debug_every_n_,
+            corrinit_debug_max_tasks_,
             corrinit_queue_capacity_,
             corrinit_num_seeds_,
             corrinit_num_oversample_,
@@ -386,6 +389,16 @@ void GaussianMapper::readConfigFromFile(std::filesystem::path cfg_path)
             log_path = result_dir_ / log_path;
         corrinit_log_path_ = log_path.string();
     }
+    if (!settings_file["CorrInit.debug_dir"].empty()) {
+        std::filesystem::path dbg_path = settings_file["CorrInit.debug_dir"].operator std::string();
+        if (dbg_path.is_relative())
+            dbg_path = result_dir_ / dbg_path;
+        corrinit_debug_dir_ = dbg_path.string();
+    }
+    if (!settings_file["CorrInit.debug_every_n"].empty())
+        corrinit_debug_every_n_ = settings_file["CorrInit.debug_every_n"].operator int();
+    if (!settings_file["CorrInit.debug_max_tasks"].empty())
+        corrinit_debug_max_tasks_ = settings_file["CorrInit.debug_max_tasks"].operator int();
 
     inactive_geo_densify_ =
         (settings_file["Mapper.inactive_geo_densify"].operator int()) != 0;

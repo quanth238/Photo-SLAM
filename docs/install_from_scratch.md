@@ -130,6 +130,33 @@ make -j8
 - Mỗi lần đổi CUDA/OpenCV/Torch → **xóa build** (`rm -rf build`).
 - Luôn chạy trong **conda env đúng**.
 
+## 7) Nếu gặp lỗi runtime: `CUDA illegal memory access`
+Lỗi này **không phải lỗi cài đặt** mà thường do **binary CUDA cũ** (build trước đó) bị load nhầm, hoặc build chưa thật sự dùng `sm_120`.
+
+**Fix nhanh (bắt buộc clean sâu):**
+```bash
+cd /home/crl/Congthai/photoslam_edgs
+rm -f lib/*.so
+rm -rf build && mkdir build && cd build
+
+cmake .. \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DWITH_CORRINIT_ZMQ=ON \
+  -DOpenCV_DIR="$OPENCV_DIR" \
+  -DTorch_DIR="$TORCH_DIR" \
+  -DCMAKE_CUDA_ARCHITECTURES=120 \
+  -DCMAKE_CUDA_COMPILER=$CUDACXX \
+  -DCMAKE_CUDA_HOST_COMPILER=$CUDAHOSTCXX
+
+make -j8
+```
+
+**Sanity check:**
+```bash
+nvcc --version
+```
+Phải thấy CUDA **12.8**. Nếu nvcc là 12.0 → sai và sẽ crash.
+
 ## 7) Chạy nhanh (one-liner)
 Ví dụ chạy evaluation 1 scene với kết quả lưu theo timestamp:
 ```bash
