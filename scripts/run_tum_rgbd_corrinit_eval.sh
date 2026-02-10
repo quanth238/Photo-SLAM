@@ -9,8 +9,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TUM_ROOT="${TUM_ROOT:-/home/crl/Congthai/datasets/TUM}"
 DATASET_CENTER="${DATASET_CENTER:-/home/crl/Congthai/datasets}"
 RESULTS_ROOT="${RESULTS_ROOT:-$ROOT/results/tum_rgbd_corrinit_eval}"
+# Normalize to absolute paths (avoid relative paths breaking when we cd into EVAL_ROOT)
+if [[ "$RESULTS_ROOT" != /* ]]; then
+  RESULTS_ROOT="$ROOT/$RESULTS_ROOT"
+fi
 # Use an isolated results_main folder for evaluation to avoid picking up unrelated runs
 RESULTS_MAIN="${RESULTS_MAIN:-$RESULTS_ROOT/_eval_main}"
+if [[ "$RESULTS_MAIN" != /* ]]; then
+  RESULTS_MAIN="$ROOT/$RESULTS_MAIN"
+fi
 EVAL_ROOT="${EVAL_ROOT:-$ROOT/third_party/Photo-SLAM-eval}"
 
 ELOFTR_PYTHON="${ELOFTR_PYTHON:-python3}"
