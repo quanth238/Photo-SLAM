@@ -86,7 +86,7 @@ for gt_dataset_name in gt_dataset:
                 
                 render_path = glob.glob(os.path.join(result, scene, "*shutdown", "render_time.txt"))
                 if len(render_path)>0:
-                   render_time = np.loadtxt(render_path[0], delimiter=' ', dtype=np.unicode_)
+                   render_time = np.loadtxt(render_path[0], delimiter=' ', dtype=np.str_)
                    render_time = render_time[:, 1].astype(np.float32)
                    Rendering_fps = 1000/np.mean(render_time)
 
@@ -151,4 +151,3 @@ for scene in scenes:
     input_folder = os.path.join(path, scene)   
 
 """  
-
