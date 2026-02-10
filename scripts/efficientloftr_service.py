@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 import sys
-
 import cv2
 import numpy as np
 import torch
@@ -43,7 +42,11 @@ def main():
 
     cfg = deepcopy(full_default_cfg)
     matcher = LoFTR(config=cfg)
-    ckpt = torch.load(args.weights, map_location=args.device)
+    try:
+        ckpt = torch.load(args.weights, map_location=args.device, weights_only=False)
+    except TypeError:
+        # Older torch versions without weights_only param
+        ckpt = torch.load(args.weights, map_location=args.device)
     matcher.load_state_dict(ckpt["state_dict"])
     matcher = reparameter(matcher)
     matcher = matcher.eval().to(args.device)
